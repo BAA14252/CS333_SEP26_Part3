@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Growth Rings · Visualization 2 (developer + city planner) · CS333 Part 3</title>
+<script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+<style>
+/* ---------- design tokens (roles, not raw colours, are used below) ---------- */
+:root{
+  color-scheme: light;
+  --page:#f4f3ef; --surface:#fcfcfb; --line:#e3e2dc; --line-2:#cfcec7;
+  --ink:#0b0b0b; --ink-2:#52514e; --ink-3:#8a8983;
+  --ready:#2a78d6;      /* existing / ready properties  (categorical slot 1) */
+  --offplan:#eb6834;    /* off-plan properties          (categorical slot 2) */
+  --accent:#0d366b; --focus:#eda100;
+  --red-line:#e34948; --green-line:#008300;
+  --nodata:#eceae4; --radius:14px;
+  font-family: system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--page);color:var(--ink);font-size:15px;line-height:1.5;-webkit-text-size-adjust:100%}
+.wrap{max-width:1280px;margin:0 auto;padding:0 16px 56px}
+header.hero{padding:28px 0 8px}
+.kicker{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2)}
+h1{font-size:clamp(26px,4.6vw,44px);line-height:1.08;margin:6px 0 8px;letter-spacing:-.02em}
+h2{font-size:clamp(19px,2.6vw,25px);margin:0 0 2px;letter-spacing:-.01em}
+h3{font-size:14px;margin:0 0 6px}
+p{margin:6px 0}
+.lede{max-width:820px;color:var(--ink-2);font-size:16px}
+.muted{color:var(--ink-2)} .small{font-size:12.5px}
+a{color:var(--accent)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-top:16px}
+.sec-head{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:baseline;justify-content:space-between}
+.tag{font-size:11.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-2)}
+
+/* ---------- persona visibility: an element with data-for is shown only for the personas it names ---------- */
+body[data-persona="buyer"] [data-for]:not([data-for~="buyer"]),
+body[data-persona="investor"] [data-for]:not([data-for~="investor"]),
+body[data-persona="developer"] [data-for]:not([data-for~="developer"]),
+body[data-persona="planner"] [data-for]:not([data-for~="planner"]){display:none!important}
+.pv{animation:rise .7s ease both}
+@keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+.prow{min-height:46px;display:flex;align-items:center;margin-top:10px;padding:5px 10px;border:1px dashed var(--line-2);border-radius:10px}
+.prow .ctl-row{row-gap:6px}
+.stage-ctl{margin-top:10px}
+h2{line-height:1.2}
+#v1Sub{min-height:2.9em}
+.chip{appearance:none;font:inherit;font-size:12.5px;border:1px solid var(--line-2);background:var(--surface);color:var(--ink);border-radius:999px;padding:3px 9px;margin-right:6px;cursor:pointer;min-height:30px}
+.chip i{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--c);margin-right:6px}
+.two+.two,.scrollx+.two{margin-top:16px}
+/* ---------- floating persona dock ---------- */
+body{padding-bottom:84px}
+#dock{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:40;display:flex;align-items:center;gap:10px;
+  background:rgba(11,11,11,.92);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-radius:999px;padding:6px 6px 6px 16px;box-shadow:0 8px 30px rgba(0,0,0,.28);max-width:calc(100vw - 16px)}
+.dock-lbl{color:#c3c2b7;font-size:12px;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap}
+.dock-btns{position:relative;display:flex}
+.dock-btns button{appearance:none;position:relative;z-index:1;font:inherit;font-size:14px;font-weight:600;border:0;background:transparent;color:#f0efec;padding:9px 16px;border-radius:999px;cursor:pointer;white-space:nowrap;transition:color .35s;min-height:40px}
+.dock-btns button[aria-pressed="true"]{color:#0b0b0b}
+.dock-next{color:#c3c2b7;font-size:13px;text-decoration:none;white-space:nowrap;padding:9px 12px 9px 6px;border-left:1px solid rgba(255,255,255,.18);margin-left:2px}
+.dock-next:hover{color:#fff}
+.prow{flex-wrap:wrap;gap:8px 14px}
+.dock-btns a{display:inline-flex;align-items:center;font-size:14px;font-weight:600;color:#f0efec;text-decoration:none;padding:9px 16px;border-radius:999px;white-space:nowrap;min-height:40px;transition:background .25s}
+.dock-btns a:hover{background:rgba(255,255,255,.14)}
+.dock-btns a[aria-current="page"]{background:#fcfcfb;color:#0b0b0b}
+.btn.play{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+.tw path{vector-effect:non-scaling-stroke}
+.dock-btns .ind{position:absolute;top:0;bottom:0;left:0;width:0;background:#fcfcfb;border-radius:999px;transition:left .45s cubic-bezier(.6,.05,.2,1),width .45s cubic-bezier(.6,.05,.2,1)}
+#brief{margin-top:10px;padding:12px 14px;border-left:3px solid var(--accent);background:var(--surface);border-radius:0 10px 10px 0}
+#brief ol{margin:4px 0 0;padding-left:20px} #brief li{margin:2px 0}
+ul.notes{margin:4px 0 12px;padding-left:20px} ul.notes li{margin:4px 0}
+
+/* ---------- controls ---------- */
+.controls{display:grid;grid-template-columns:1.25fr 1fr;gap:16px}
+.ctl-row{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin-top:8px}
+.ctl-label{font-size:12px;color:var(--ink-2);min-width:64px}
+.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:999px;overflow:hidden;background:var(--surface)}
+.seg button{appearance:none;font:inherit;font-size:13px;border:0;background:transparent;color:var(--ink);padding:6px 12px;cursor:pointer;min-height:34px}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button[aria-pressed="true"]{background:var(--accent);color:#fff}
+.btn{appearance:none;font:inherit;font-size:13px;border:1px solid var(--line-2);background:var(--surface);color:var(--ink);border-radius:999px;padding:6px 12px;cursor:pointer;min-height:34px}
+.btn:hover{border-color:var(--ink-3)}
+select,input[type=range]{font:inherit}
+select{border:1px solid var(--line-2);border-radius:8px;padding:6px 8px;background:var(--surface);color:var(--ink);min-height:34px;max-width:100%}
+#selMetric{width:270px}
+input[type=range]{accent-color:var(--accent);width:170px;max-width:100%}
+label.chk{display:inline-flex;gap:6px;align-items:center;font-size:13px;cursor:pointer}
+#rangeLabel{font-weight:600}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+
+/* ---------- layout of the main view ---------- */
+.city{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(300px,1fr);gap:16px;margin-top:10px}
+.side{display:flex;flex-direction:column;gap:14px;min-width:0}
+.panel{border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--surface);min-width:0}
+.two>*,.city>*,.controls>*{min-width:0}
+.two{display:grid;grid-template-columns:1.35fr 1fr;gap:16px;margin-top:10px}
+svg{display:block;width:100%;height:auto;overflow:visible;touch-action:pan-y}
+#cityWrap{position:relative;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff}
+#citySvg{touch-action:none;overflow:hidden}
+.zoomBtns{position:absolute;right:8px;top:8px;display:flex;flex-direction:column;gap:6px}
+.zoomBtns .btn{padding:4px 10px;background:rgba(252,252,251,.94)}
+.hint{position:absolute;left:10px;bottom:8px;font-size:11.5px;color:var(--ink-2);background:rgba(252,252,251,.88);padding:2px 6px;border-radius:6px;pointer-events:none}
+.legend{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;font-size:12px;color:var(--ink-2);margin:8px 0 0}
+.legend .sw{display:inline-block;width:16px;height:11px;border-radius:3px;margin-right:4px;vertical-align:-1px;border:1px solid rgba(0,0,0,.06)}
+.legend b{color:var(--ink);font-weight:600}
+.scrollx{overflow-x:auto;-webkit-overflow-scrolling:touch}
+
+/* ---------- marks ---------- */
+.poly{stroke:#fff;stroke-width:.6;vector-effect:non-scaling-stroke;cursor:pointer;transition:opacity .25s}
+.bubble{stroke:#fff;stroke-width:1.2;vector-effect:non-scaling-stroke;cursor:pointer}
+.dim{opacity:.16!important}
+.is-sel{stroke:var(--ink)!important;stroke-width:2.4!important}
+.axis text{fill:var(--ink-2);font-size:11px} .axis path,.axis line{stroke:var(--line-2)}
+.grid line{stroke:var(--line)} .grid path{display:none}
+.lbl{font-size:11px;fill:var(--ink);paint-order:stroke;stroke:#fff;stroke-width:3px;stroke-linejoin:round;pointer-events:none}
+.note{font-size:11px;fill:var(--ink-2)}
+.rank-row{display:grid;grid-template-columns:minmax(0,1fr) 92px;gap:8px;align-items:center;padding:3px 4px;border-radius:6px;cursor:pointer;font-size:13px}
+.rank-row:hover,.rank-row.on{background:#efeee9}
+.rank-row .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rank-bar{height:8px;border-radius:0 4px 4px 0;background:var(--ready)}
+.rank-val{font-variant-numeric:tabular-nums;font-size:12px;color:var(--ink-2);text-align:right}
+.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:8px 0}
+.tile{border:1px solid var(--line);border-radius:10px;padding:8px}
+.tile .v{font-size:17px;font-weight:650;font-variant-numeric:tabular-nums;line-height:1.2}
+.tile .k{font-size:11px;color:var(--ink-2);line-height:1.25}
+#tip{position:fixed;z-index:50;pointer-events:none;background:#fff;border:1px solid var(--line-2);border-radius:10px;
+  box-shadow:0 6px 24px rgba(0,0,0,.14);padding:9px 11px;font-size:12.5px;max-width:270px;opacity:0;transition:opacity .12s}
+#tip b{font-size:13.5px} #tip table{border-collapse:collapse;margin-top:4px} #tip td{padding:1px 0} #tip td+td{padding-left:12px;text-align:right;font-variant-numeric:tabular-nums}
+#loader{position:fixed;inset:0;background:var(--page);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:100;padding:24px;text-align:center}
+#bar{width:min(360px,80vw);height:8px;border-radius:8px;background:var(--line);overflow:hidden}
+#bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+details{margin-top:8px} summary{cursor:pointer;font-weight:600}
+table.plain{border-collapse:collapse;width:100%;font-size:13px}
+table.plain th,table.plain td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
+table.plain th{font-size:12px;color:var(--ink-2);font-weight:600}
+.pill{display:inline-block;font-size:11px;border:1px solid var(--line-2);border-radius:999px;padding:0 7px;color:var(--ink-2);margin-left:6px}
+
+/* ---------- responsive: tablets and phones ---------- */
+@media (max-width: 980px){
+  .city,.two,.controls{grid-template-columns:1fr!important}
+}
+@media (max-width: 560px){
+  .wrap{padding:0 10px 40px} .card{padding:12px} .zoomBtns .btn{min-height:30px;padding:2px 9px;font-size:12px} .hint{display:none}
+  .dock-lbl{display:none} #dock{padding:5px;bottom:8px} .dock-btns button{padding:9px 12px;font-size:13px} .dock-next{font-size:12px;padding:9px 8px 9px 6px} .prow{padding:4px 6px}
+  table.plain,table.plain tbody,table.plain tr,table.plain td{display:block;width:auto!important} table.plain th{display:none}
+  table.plain tr{border-bottom:1px solid var(--line);padding:8px 0} table.plain td{border:0;padding:2px 0} table.plain td:first-child{font-weight:650} .tiles{grid-template-columns:repeat(3,1fr)}
+  .ctl-label{min-width:100%}
+}
+@media (prefers-reduced-motion: reduce){ *{transition:none!important;scroll-behavior:auto!important} }
+</style>
+</head>
+<body data-persona="buyer">
+<div id="loader"><b>Loading Dubai Land Department transactions…</b><div id="bar"><i></i></div><span class="muted small" id="loadMsg">fetching 18 MB of CSV from the course repository</span></div>
+<div id="tip" role="status"></div>
+
+<!-- floating persona switch: stays on screen so the transition between personas can be watched -->
+<nav id="dock" aria-label="Lens switch"><span class="dock-lbl">View as</span><div class="dock-btns" id="dockBtns"><i class="ind" id="dockInd"></i></div></nav>
+
+<div class="wrap">
+<header class="hero">
+  <div class="kicker">CS333 Introduction to Data Visualisation · Team Project Part 3 · D3.js · Basil Albakri &amp; Saad Alshahrani</div>
+  <h1 id="pageH1"></h1>
+  <p class="lede" id="pageLede"></p>
+  <div id="brief"></div>
+</header>
+
+<!-- ===================== shared controls ===================== -->
+<section class="card" id="controls">
+  <div class="controls">
+    <div>
+      <div class="sec-head"><h3>Period <span class="muted" style="font-weight:400">· drag on the chart to select months</span></h3><span id="rangeLabel"></span></div>
+      <svg id="brushSvg" role="img" aria-label="Monthly sales with a draggable period selector"></svg>
+      <div class="ctl-row">
+        <span class="ctl-label">Jump to</span>
+        <button class="btn" data-range="all">All (2015–Aug 2026)</button>
+        <button class="btn" data-range="24">Last 24 months</button>
+        <button class="btn" data-range="2021">Since Jan 2021</button>
+        <button class="btn" data-range="pre">2015–2020</button>
+      </div>
+    </div>
+    <div>
+      <h3>Filters <span class="muted" style="font-weight:400">· apply to every chart on this page</span></h3>
+      <div class="ctl-row"><span class="ctl-label">Property</span><div class="seg" id="segType"></div></div>
+      <div class="ctl-row"><span class="ctl-label">Status</span><div class="seg" id="segReg"></div></div>
+      <div class="ctl-row"><span class="ctl-label" id="minNName">Reliability</span>
+        <label class="chk">min. sales per community <input type="range" id="minN" min="3" max="60" step="1" style="width:110px"> <b id="minNLabel"></b></label>
+        <label class="chk"><input type="checkbox" id="clean" checked> remove implausible records</label>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== the stage: one city, re-arranged per persona ===================== -->
+<section class="card" id="stage">
+  <div class="tag" id="stageTag"></div><h2 id="stageTitle"></h2>
+  <div class="ctl-row stage-ctl">
+    <span class="ctl-label" style="min-width:0">Show as</span>
+    <div class="seg" id="segLayout" role="group" aria-label="Layout"></div>
+    <select id="selMetric" aria-label="Colour by"></select>
+  </div>
+  <div class="prow">
+    <button class="btn play" id="playBtn" type="button">▶ Play 2015 → 2026</button>
+    <div class="ctl-row" data-for="developer" style="margin:0"><span class="ctl-label" style="min-width:0">Selected development:</span><b id="devName"></b><span class="muted small">click a circle or a ridge to change it</span></div>
+    <div class="ctl-row" data-for="planner" style="margin:0"><span class="muted small">Clockwise from the top: nearest to the metro first, furthest last. Press Play and watch which side the outer rings get heavy on.</span></div>
+  </div>
+  <p class="muted small" id="v1Sub"></p>
+  <div class="city">
+    <div>
+      <div id="cityWrap">
+        <svg id="citySvg" role="img" aria-label="Growth rings: sales of every community in every year, as rings or as a grid"></svg>
+        <div class="hint" id="cityHint"></div>
+      </div>
+      <div class="legend" id="cityLegend"></div>
+    </div>
+    <div class="side">
+      <div class="panel"><h3 id="rankTitle"></h3><div id="rank"></div></div>
+      <div class="panel" id="profile"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== Buyer ===================== -->
+<!-- ===================== Investor ===================== -->
+
+<!-- ===================== Developer ===================== -->
+<section class="card pv" data-for="developer" id="s-developer">
+  <div class="sec-head">
+    <div><div class="tag">Developer lens · one more sub-view</div><h2>Launch waves</h2></div>
+    <div class="ctl-row" style="margin:0"><div class="seg" id="segWave"></div></div>
+  </div>
+  <p class="muted small">Each ridge is one master development, quarter by quarter. The filled <b style="color:var(--offplan)">orange</b> wave is off-plan sales (the launch); the <b style="color:var(--ready)">blue</b> line is sales of existing homes (the resale market that follows). Ridges are ordered by when their off-plan wave happened. <b>Click a ridge:</b> the page goes up to the rings, where that community is selected. The shaded band is the selected period; press <b>Play</b> above the city view to slide it through the years.</p>
+  <div class="scrollx"><svg id="waveSvg" role="img" aria-label="Quarterly off-plan and existing sales for the largest master developments"></svg></div>
+</section>
+
+<!-- ===================== Planner ===================== -->
+<section class="card pv" data-for="planner" id="s-planner">
+  <div class="tag">City planner lens · one more sub-view</div><h2>Is the market moving away from the metro?</h2>
+  <p class="muted small">The same five distance bands as the rings, as shares of each year's sales. <b>Click a band:</b> the page goes up to the rings and the communities of that band stay highlighted. Click it again to clear.</p>
+  <div class="panel" style="margin-top:10px"><h3>Share of sales by distance to the nearest metro station</h3><svg id="bandSvg" role="img" aria-label="Share of sales by distance band per year"></svg><div class="legend" id="bandLegend"></div></div>
+</section>
+
+<!-- ===================== Design notes (deliverable) ===================== -->
+<section class="card" id="notes">
+  <div class="tag">Submission notes for this visualization</div><h2>Encoding, interaction and value added</h2>
+  <p><b>Encoding</b> (what each mark means). One main view and four linked sub-views, read through two lenses: developer and planner.</p>
+  <ul class="notes">
+    <li><b>Main view, growth rings.</b> Drawn like the rings of a tree. Each ring is one year (2015 in the middle, 2026 outside). Each spoke is one community. Each circle is one community in one year, and its area = the number of sales in that year.</li>
+    <li><b>Developer lens.</b> Spokes are ordered clockwise by the time of the community's off-plan wave. Colour (light to dark orange) = share of off-plan sales in that year. Communities that launched late are empty in the inner rings and dark in the outer ones.</li>
+    <li><b>Planner lens.</b> The same circles; spokes are ordered clockwise by distance to the nearest metro station. Colour (dark to light blue) = distance band; dark = close. An outer band repeats the distance band.</li>
+    <li><b>Unrolled layout.</b> The same circles on a straight grid: one row per community, one column per year.</li>
+    <li><b>Sub-view 1, ranked list</b> (both lenses). Bar length = off-plan sales (developer) or sales of the busiest communities more than 4 km from a station (planner).</li>
+    <li><b>Sub-view 2, selected community</b> (both lenses). Its spoke as a bar chart: x = year, bar height = sales, orange = off-plan, blue = existing homes.</li>
+    <li><b>Sub-view 3, launch waves</b> (developer). One row per master development, x = quarter, orange area = off-plan sales, blue line = existing-home sales, rows ordered by the time of the off-plan wave, shaded band = selected period.</li>
+    <li><b>Sub-view 4, distance bands</b> (planner). x = year, height = share of sales, colour = distance band (always adds to 100%).</li>
+  </ul>
+  <p><b>Interaction.</b></p>
+  <ul class="notes">
+    <li><b>Switch lens</b> (floating bar): the spokes are sorted again and every circle travels around the rings to its new place.</li>
+    <li><b>Switch layout:</b> the rings unroll into the grid, and roll up again.</li>
+    <li><b>Play:</b> a 12-month window moves from 2015 to 2026, ring by ring. The shaded band also crosses the launch waves.</li>
+    <li><b>Click</b> a circle, a list row or a wave: that community is selected in every sub-view, and its spoke is marked. A click on a wave also brings the rings back on screen.</li>
+    <li><b>Click</b> a distance band: the page goes up to the rings and the spokes of that band stay highlighted.</li>
+    <li><b>Hover</b> any mark for its exact numbers.</li>
+    <li><b>Filters:</b> period brush, property type, status, minimum sales, remove errors. Colour menu.</li>
+  </ul>
+  <p><b>Value added.</b> One picture shows twelve years of every community at once, with no map.</p>
+  <ul class="notes">
+    <li><b>Developer:</b> Where is the launch wave now, and where was it before? Which communities launched together? How long did earlier waves last, and what followed them?</li>
+    <li><b>Planner:</b> Is the new activity near the metro? No: sales within 2 km of a station fell from 36% (2015) to 24% (2026), and sales more than 8 km away rose from 25% to 29%. The outer rings are heavy on the far side.</li>
+  </ul>
+  <p><b>Data.</b> Main file: <code>transactions.csv</code> from the Dubai Land Department. It is a random 10% sample, and we do not scale the counts up. We added two files from the course repository:</p>
+  <ul class="notes">
+    <li><code>dubai.geojson</code>: the list of communities with their names. Linked by community number (<code>comm_num = COMM_NUM</code>).</li>
+    <li><code>dubai_metro_stations.geojson</code>: the 56 stations. Linked by location: we measure the straight-line distance from each area centre (<code>area_lat, area_lon</code>) to every station and keep the nearest.</li>
+    
+  </ul>
+  <p class="small muted">All three files are loaded from the course repository each time the page opens.</p>
+</section>
+<!-- ===================== Data quality ===================== -->
+<section class="card" id="dq">
+  <div class="tag">Data quality · the same rules in both visualizations</div><h2>What is wrong with the data, and what we did</h2>
+  <p class="muted small">Counted live from the file. Test our choices in the Filters box: <b>remove implausible records</b> and <b>min. sales per community</b>. Both change every chart.</p>
+  <h3 style="margin-top:12px">Cleaning, step by step</h3>
+  <ol class="notes" id="dqSteps" style="list-style:none;padding-left:0"></ol>
+  <h3 style="margin-top:12px">Every data problem and what we did</h3>
+  <table class="plain" id="dqTable"></table>
+</section>
+
+<p class="small muted" style="margin-top:14px">Data: Dubai Land Department transactions (10% sample), Dubai Municipality communities, and metro stations, all from <a href="https://github.com/sharios/CS333/tree/main/2026-27">sharios/CS333</a>. Built with D3 v7.</p>
+</div>
+
+<script>
+"use strict";
+/* =====================================================================================
+   DUBAI, REARRANGED  ·  CS333 Part 3
+   Reading guide to this script
+     1. CONFIG and STATE        every decision and every user choice lives in two objects
+     2. LOAD                    fetch the three files straight from the course repository
+     3. PREPARE                 parse rows once, apply the data-quality rules, spatial join
+     4. COMPUTE                 filter + aggregate for the current STATE (pure functions)
+     5. RENDER                  one function per view; each uses the D3 data join
+     6. WIRING                  controls -> STATE -> compute() -> render()
+   ===================================================================================== */
+
+/* ---------- 1. CONFIG and STATE ---------- */
+const REPO = "https://raw.githubusercontent.com/sharios/CS333/main/2026-27/";
+const URLS = {
+  tx:     REPO + "Part%202/transactions.csv",
+  geo:    REPO + "Part%202/dubai.geojson",
+  metro:  REPO + "Part%203/dubai_metro_stations.geojson"
+};
+const CFG = {
+  y0: 2015, nMonths: 140,          // analysis window: Jan 2015 (month 0) .. Aug 2026 (month 139)
+  minPrice: 1000,                  // AED per m2: anything cheaper is a registration error
+  minSize: 10,                     // m2: smaller "homes" are parking bays / partial shares
+  bands: [1, 2, 4, 8],             // km from nearest metro station
+  bandNames: ["under 1 km", "1–2 km", "2–4 km", "4–8 km", "over 8 km"],
+  rooms: ["Studio", "1 B/R", "2 B/R", "3 B/R", "4+ B/R"]
+};
+const COL = {
+  blues: ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b"],
+  bandCols: ["#0d366b", "#256abf", "#5598e7", "#9ec5f4", "#cde2fb"],             // near = dark
+  diverging: ["#256abf", "#6da7ec", "#b7d3f6", "#e9e8e4", "#f4b9b0", "#e5736b", "#b92f2f"],
+  ready: "#2a78d6", offplan: "#eb6834", ink: "#0b0b0b", ink2: "#52514e", nodata: "#eceae4"
+};
+const PAGE = "city";             // which of the two visualizations this file is
+const STATE = {
+  persona: null, layout: "map", metric: "price",
+  range: [116, 139],               // selected months (inclusive)
+  type: "all", reg: "all", rooms: "1 B/R", budget: 1500000,
+  minN: 10, clean: true, metro: true,
+  sel: null,                       // selected community number
+  pinBand: null, hi: null, waveScale: "row",
+  compare: [null, null, null], cmpNext: 0,   // investor shortlist (3 colour slots)
+  dev: null                                  // developer: selected master development
+};
+/* this file is one of two visualizations; it has two lenses (personas) that share the main view */
+const PAGE_INFO = {
+  n: 2, h1: "Growth Rings", lenses: ["developer", "planner"],
+  lede: "Dubai's housing market drawn like the rings of a tree: one ring for every year since 2015, one spoke for every community. The developer orders the spokes by launch time and sees which communities are new. The planner orders them by distance to the metro and sees where the growth went. Press Play, then switch lens in the bar at the bottom of the screen.",
+  layouts: [["rings", "Growth rings"], ["grid", "Unrolled"]]
+};
+const PERSONAS = {
+  developer: { name: "Developer", dock: "Developer", title: "Where is the off-plan wave now, and where has it been?",
+    metrics: ["offshare", "price"], preset: { layout: "rings", metric: "offshare", range: [104, 139] },
+    brief: ["Every ring is a year, every spoke is a community, every circle is its sales in that year. Dark orange means mostly <b>off-plan</b>: a launch.",
+            "The spokes run clockwise from the first launches to the last. Early communities have circles in every ring, now pale. Late ones are <b>empty inside and dark outside</b>.",
+            "Press <b>Play</b>, or scroll to the <a href='#s-developer'>launch waves</a> for the same story by master development."] },
+  planner: { name: "City planner", dock: "Planner", title: "Is the city growing where its metro is?",
+    metrics: ["dist", "offshare"], preset: { layout: "rings", metric: "dist", range: [104, 139] },
+    brief: ["The same circles, but the spokes are now ordered by <b>distance to the nearest metro station</b>, clockwise from nearest to furthest.",
+            "Compare the inner rings with the outer rings: in recent years the big circles are on the far side.",
+            "<a href='#s-planner'>Below</a>: the same shift year by year, as shares of all sales."] }
+};
+
+/* ---------- small helpers ---------- */
+const $ = s => document.querySelector(s);
+const fInt = d3.format(",d"), fPct = d3.format(".0%");
+const fAED = v => v == null || isNaN(v) ? "n/a" : v >= 1e6 ? String(+(v / 1e6).toFixed(v >= 1e7 ? 0 : 2)) + "M" : v >= 1e3 ? Math.round(v / 1e3) + "k" : Math.round(v) + "";
+const fPm = v => v == null || isNaN(v) ? "n/a" : fInt(Math.round(v / 10) * 10);
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const monthName = m => MONTHS[m % 12] + " " + (CFG.y0 + Math.floor(m / 12));
+const quarterName = q => "Q" + (q % 4 + 1) + " " + (CFG.y0 + Math.floor(q / 4));
+const title = s => s.toLowerCase().replace(/(^|[\s\-\/'(])([a-z])/g, (m, a, b) => a + b.toUpperCase()).replace(/\bDmcc\b/g, "DMCC").replace(/\bJbr\b/g, "JBR").replace(/\bDamac\b/g, "DAMAC").replace(/\s+/g, " ");
+const quant = (sorted, p) => d3.quantileSorted(sorted, p);
+const DUR = () => matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 900;
+function haversine(la1, lo1, la2, lo2) {            // great-circle distance in km
+  const p = Math.PI / 180, a = Math.sin((la2 - la1) * p / 2) ** 2 + Math.cos(la1 * p) * Math.cos(la2 * p) * Math.sin((lo2 - lo1) * p / 2) ** 2;
+  return 12742 * Math.asin(Math.sqrt(a));
+}
+const bandOf = km => km == null ? null : CFG.bands.findIndex(b => km < b) === -1 ? 4 : CFG.bands.findIndex(b => km < b);
+
+/* ---------- tooltip (works with mouse and touch) ---------- */
+const tip = d3.select("#tip");
+function showTip(ev, html) {
+  tip.html(html).style("opacity", 1);
+  const r = tip.node().getBoundingClientRect(), pad = 12;
+  let x = ev.clientX + 14, y = ev.clientY + 14;
+  if (x + r.width + pad > innerWidth) x = ev.clientX - r.width - 14;
+  if (y + r.height + pad > innerHeight) y = ev.clientY - r.height - 14;
+  tip.style("left", Math.max(pad, x) + "px").style("top", Math.max(pad, y) + "px");
+}
+const hideTip = () => tip.style("opacity", 0);
+addEventListener("scroll", hideTip, { passive: true });
+
+/* ---------- 2. LOAD ---------- */
+const DATA = {};       // everything derived once from the files
+async function fetchTextWithProgress(url, approxBytes) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(url + " -> HTTP " + res.status);
+  if (!res.body) return res.text();
+  const reader = res.body.getReader(), dec = new TextDecoder(); let got = 0, out = [];
+  for (;;) {
+    const { done, value } = await reader.read(); if (done) break;
+    got += value.length; out.push(dec.decode(value, { stream: true }));
+    $("#bar i").style.width = Math.min(96, got / approxBytes * 100) + "%";
+  }
+  out.push(dec.decode()); return out.join("");
+}
+async function load() {
+  const [txt, geo, metro] = await Promise.all([
+    fetchTextWithProgress(URLS.tx, 18400000), d3.json(URLS.geo), d3.json(URLS.metro)]);
+  $("#loadMsg").textContent = "parsing and checking 89,212 rows";
+  await new Promise(r => setTimeout(r, 30));
+  prepare(txt, geo, metro);
+}
+
+/* ---------- 3. PREPARE: parse once, apply the data-quality rules ---------- */
+function prepare(txt, geo, metro) {
+  /* 3a. metro stations (order = station code = travel order) */
+  const stations = metro.features.map(f => ({
+    id: f.properties.STATION_NO, lat: +f.properties.LAT_STATION, lon: +f.properties.LON_STATION, route: f.properties.ROUTE,
+    name: /^Stations? R\d+/.test(f.properties.STATION_NAME) ? "Route 2020 · " + f.properties.STATION_NO : f.properties.STATION_NAME
+  })).sort((a, b) => d3.ascending(a.id, b.id));
+
+  /* 3b. transactions: keep only the fields we use, in compact form.
+         Dates are read as text (YYYY-MM-DD) and turned into a month index, so no Date object
+         and no time zone is ever involved. */
+  const L = { all: 0, old: 0, future: 0, baddate: 0, window: 0, notSale: 0, notHome: 0, base: 0, cheap: 0, tiny: 0, bad: 0, noRooms: 0, noMaster: 0, noMetro: 0, noCoord: 0, minDate: "9999", maxDate: "0" };
+  const S = [], areaPos = new Map(), priceAll = [], weekdayMissing = new Set();
+  const roomMap = { "Studio": 0, "1 B/R": 1, "2 B/R": 2, "3 B/R": 3, "4 B/R": 4, "5 B/R": 4, "6 B/R": 4, "7 B/R": 4 };
+  d3.csvParse(txt, r => {
+    L.all++;
+    const ds = r.instance_date, y = +ds.slice(0, 4), mo = +ds.slice(5, 7);
+    if (!(y > 1900 && mo >= 1 && mo <= 12)) { L.baddate++; return; }
+    if (ds < L.minDate) L.minDate = ds; if (ds > L.maxDate) L.maxDate = ds;
+    const m = (y - CFG.y0) * 12 + mo - 1;
+    if (m < 0) { L.old++; return; }                               // rule 1: before 2015 (sparse, some implausible)
+    if (m >= CFG.nMonths) { L.future++; return; }                 // rule 2: September 2026 is an incomplete month
+    L.window++;
+    if (r.trans_group_en !== "Sales") { L.notSale++; return; }    // rule 3: mortgages and gifts carry no market price
+    if (r.property_type_en !== "Unit" && r.property_type_en !== "Villa") { L.notHome++; return; }   // rule 4
+    L.base++;
+    const ppm = +r.meter_sale_price, size = +r.procedure_area, areaId = +r.area_id;
+    const cheap = !(ppm >= CFG.minPrice), tiny = !(size >= CFG.minSize);
+    if (cheap) L.cheap++; if (tiny) L.tiny++; if (cheap || tiny) L.bad++;
+    if (r.rooms_en === "") L.noRooms++; if (r.master_project_en === "") L.noMaster++; if (r.nearest_metro_en === "") L.noMetro++;
+    const lat = +r.area_lat, lon = +r.area_lon;
+    if (r.area_lat === "" || !isFinite(lat)) L.noCoord++; else if (!areaPos.has(areaId)) areaPos.set(areaId, { id: areaId, lat, lon, name: r.area_name_en, comm: +r.comm_num });
+    priceAll.push(ppm);
+    S.push({ m, q: Math.floor(m / 3), comm: +r.comm_num, areaId, villa: r.property_type_en === "Villa", off: r.reg_type_en === "Off-Plan Properties",
+             rooms: roomMap[r.rooms_en] ?? -1, mp: r.master_project_en || null, area: r.area_name_en, size, worth: +r.actual_worth, ppm, bad: cheap || tiny, km: null, stn: null });
+  });
+
+  /* 3c. spatial join: nearest metro station for every DLD area centre.
+         DLD's own nearest_metro_en is blank for about a third of the rows, so we measure it ourselves. */
+  for (const a of areaPos.values()) {
+    let best = Infinity, bs = null;
+    for (const s of stations) { const d = haversine(a.lat, a.lon, s.lat, s.lon); if (d < best) { best = d; bs = s.id; } }
+    a.km = best; a.stn = bs;
+  }
+  for (const r of S) { const a = areaPos.get(r.areaId); if (a) { r.km = a.km; r.stn = a.stn; } }
+
+  /* 3d. communities: geometry + population + names people actually use */
+  const byComm = d3.group(S, d => d.comm);
+  const comms = geo.features.map(f => {
+    const p = f.properties, id = +p.COMM_NUM, rows = byComm.get(id) || [];
+    const top = (acc) => rows.length ? d3.greatest(d3.rollup(rows.filter(d => acc(d)), v => v.length, acc), d => d[1])?.[0] : null;
+    const kms = rows.filter(d => d.km != null).map(d => d.km);
+    return { id, feature: f, dm: title(p.CNAME_E), name: top(d => d.area) || title(p.CNAME_E), project: top(d => d.mp),
+             pop: +p["Population 2019"] || 0, km2: +p["Area Sq Km"], lat: +p.Latitude, lon: +p.Longitude,
+             km: kms.length ? d3.mean(kms) : d3.min(stations, s => haversine(+p.Latitude, +p.Longitude, s.lat, s.lon)) };
+  });
+  Object.assign(DATA, { S, L, stations, areas: [...areaPos.values()], comms, commById: new Map(comms.map(c => [c.id, c])), priceAll });
+}
+
+/* ---------- 4. COMPUTE: everything that depends on STATE ---------- */
+const VIEW = {};       // results of the last compute(), read by the render functions
+function summarise(rows) {                      // robust summary of a group of sales
+  const p = rows.map(d => d.ppm).sort(d3.ascending);
+  return { n: rows.length, med: quant(p, .5), q1: quant(p, .25), q3: quant(p, .75), off: d3.mean(rows, d => d.off ? 1 : 0) };
+}
+function compute() {
+  const st = STATE, [a, b] = st.range;
+  /* F = sales passing the global filters (all months); Fr = F inside the selected period */
+  const FT = DATA.S.filter(d => (!st.clean || !d.bad) && (st.type === "all" || (st.type === "villa") === d.villa));   // before the Status filter
+  const F = FT.filter(d => st.reg === "all" || (st.reg === "off") === d.off);
+  const Fr = F.filter(d => d.m >= a && d.m <= b);
+  /* growth compares the first and last 24 months of the period (or halves if it is short) */
+  const len = b - a + 1, win = len >= 48 ? 24 : Math.floor(len / 2), gapYears = Math.max((len - win) / 12, 1 / 12);
+  const growth = rows => {
+    const e = rows.filter(d => d.m < a + win).map(d => d.ppm).sort(d3.ascending), l = rows.filter(d => d.m > b - win).map(d => d.ppm).sort(d3.ascending);
+    return e.length >= 8 && l.length >= 8 && win >= 6 ? Math.pow(quant(l, .5) / quant(e, .5), 1 / gapYears) - 1 : null;
+  };
+  const city = Object.assign(summarise(Fr), { growth: growth(Fr) });
+  const groups = d3.group(Fr, d => d.comm);
+  const stats = new Map();
+  for (const c of DATA.comms) {
+    const rows = groups.get(c.id) || [];
+    const s = rows.length ? summarise(rows) : { n: 0 };
+    s.ok = s.n >= st.minN;                                   // enough sales to trust a median
+    s.growth = s.ok ? growth(rows) : null;
+    s.per1000 = c.pop >= 500 ? s.n / c.pop * 1000 : null;    // undefined where (almost) nobody lived in 2019
+    const match = rows.filter(d => d.rooms === CFG.rooms.indexOf(st.rooms));
+    s.nMatch = match.length;
+    s.afford = match.length >= Math.max(5, Math.round(st.minN / 2)) ? d3.mean(match, d => d.worth <= st.budget ? 1 : 0) : null;
+    s.homeSize = s.afford != null ? d3.median(match, d => d.size) : null;
+    s.homeMed = s.afford != null ? d3.median(match, d => d.worth) : null;          // median price of the chosen home (buyer towers)
+    const eR = rows.filter(d => d.m < a + win), lR = rows.filter(d => d.m > b - win), yrs = Math.max(win, 1) / 12;   // both ends of the period (investor comets)
+    s.early = eR.length >= 8 ? { med: d3.median(eR, d => d.ppm), rate: eR.length / yrs } : null;
+    s.late = lR.length >= 8 ? { med: d3.median(lR, d => d.ppm), rate: lR.length / yrs } : null;
+    stats.set(c.id, s);
+  }
+  Object.assign(VIEW, { F, FT, Fr, city, stats, win });
+  VIEW.metric = buildMetric();
+  if (STATE.sel == null || !DATA.commById.has(STATE.sel)) STATE.sel = d3.greatest(DATA.comms, c => stats.get(c.id).n).id;
+  if (!STATE.dev) STATE.dev = DATA.commById.get(STATE.sel).project;
+}
+
+/* The colour measure: value accessor, colour scale and legend, built for the current data */
+function buildMetric() {
+  const st = STATE, stats = VIEW.stats, vals = k => DATA.comms.map(c => stats.get(c.id)).filter(s => s.ok && s[k] != null).map(s => s[k]);
+  const ramp = (from, to, n) => d3.quantize(d3.interpolateLab(from, to), n);
+  const rangeLabels = (th, fmt) => !th.length || th.some(v => v == null || isNaN(v)) ? [] : [("under " + fmt(th[0]))].concat(th.slice(1).map((t, i) => fmt(th[i]) + "–" + fmt(t)), ["over " + fmt(th[th.length - 1])]);
+  const M = {
+    price: () => { const sc = d3.scaleQuantile(vals("med"), COL.blues);
+      return { label: "Median price per m²", unit: "AED/m²", value: (s) => s.ok ? s.med : null, color: sc, fmt: v => fPm(v), legend: rangeLabels(sc.quantiles(), v => fAED(v)), cols: COL.blues, note: "7 quantile classes (equal number of communities in each)" }; },
+    growth: () => { const g0 = VIEW.city.growth || 0, sc = d3.scaleThreshold([-.06, -.03, -.01, .01, .03, .06], COL.diverging);
+      return { label: "Price growth per year", unit: "% per year", value: s => s.growth, color: v => sc(v - g0), fmt: v => d3.format("+.1%")(v), cols: COL.diverging,
+               legend: ["6+ pts slower", "3–6 slower", "1–3 slower", "≈ city (" + d3.format("+.1%")(g0) + ")", "1–3 faster", "3–6 faster", "6+ pts faster"], note: "median price per m², last vs first " + VIEW.win + (VIEW.win === 1 ? " month" : " months") + " of the period, annualised; colour = difference from the city-wide rate" }; },
+    offshare: () => { const cols = ramp("#fde6da", "#a23a10", 5), sc = d3.scaleQuantize([0, 1], cols);
+      return { label: "Off-plan share of sales", unit: "share", value: s => s.ok ? s.off : null, color: sc, fmt: fPct, cols, legend: ["0–20%", "20–40%", "40–60%", "60–80%", "80–100%"], note: "share of sales registered as off-plan" }; },
+    afford: () => { const cols = ramp("#d9f3e9", "#0b6b4a", 5), sc = d3.scaleQuantize([0, 1], cols);
+      return { label: "Within my budget", unit: "share", value: s => s.afford, color: sc, fmt: fPct, cols, legend: ["0–20%", "20–40%", "40–60%", "60–80%", "80–100%"], note: "share of " + st.rooms + " sales at or under AED " + fAED(st.budget) }; },
+    per1000: () => { const cols = ramp("#e7e3fb", "#33248f", 6), sc = d3.scaleQuantile(vals("per1000"), cols);
+      return { label: "Sales per 1,000 residents", unit: "per 1,000", value: s => s.ok ? s.per1000 : null, color: sc, fmt: v => v >= 100 ? fInt(v) : v.toFixed(1), cols, legend: rangeLabels(sc.quantiles(), v => v >= 10 ? Math.round(v) : v.toFixed(1)), note: "sales in the period ÷ 2019 population; communities with under 500 residents in 2019 are not rated" }; },
+    dist: () => { const sc = d3.scaleThreshold(CFG.bands, COL.bandCols);
+      return { label: "Distance to nearest metro", unit: "km", value: (s, c) => s.n > 0 || c.pop > 0 ? c.km : null, color: sc, fmt: v => v.toFixed(1) + " km", cols: COL.bandCols, legend: CFG.bandNames, always: true, note: "straight-line distance from the area centre to the nearest station (2020 network)" }; }
+  };
+  const m = M[st.metric](); m.key = st.metric; return m;
+}
+const metricVal = c => VIEW.metric.value(VIEW.stats.get(c.id), c);
+function fillOf(c) {
+  const s = VIEW.stats.get(c.id), v = metricVal(c);
+  if (v != null) return VIEW.metric.color(v);
+  return s.n > 0 ? "url(#hatch)" : COL.nodata;
+}
+
+/* ---------- 5. RENDER ---------- */
+/* 5a. Period brush: context chart of monthly sales */
+const BR = {};
+function renderBrush(init) {
+  const svg = d3.select("#brushSvg"), W = svg.node().parentNode.clientWidth, H = 92, m = { l: 34, r: 8, t: 6, b: 20 };
+  svg.attr("viewBox", `0 0 ${W} ${H}`);
+  const counts = new Array(CFG.nMonths).fill(0); for (const d of VIEW.F) counts[d.m]++;
+  const x = d3.scaleLinear([0, CFG.nMonths], [m.l, W - m.r]), y = d3.scaleLinear([0, d3.max(counts) || 1], [H - m.b, m.t]).nice(3);
+  svg.selectAll("*").remove();
+  svg.append("g").attr("class", "axis").attr("transform", `translate(0,${H - m.b})`).call(d3.axisBottom(x).tickValues(d3.range(0, CFG.nMonths, W < 520 ? 24 : 12)).tickFormat(v => CFG.y0 + v / 12).tickSizeOuter(0));
+  svg.append("g").attr("class", "axis").attr("transform", `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(3).tickSizeOuter(0)).call(g => g.select(".domain").remove());
+  svg.append("path").attr("fill", "#c9c8c2").attr("d", d3.area().x((d, i) => x(i + .5)).y0(y(0)).y1(d => y(d)).curve(d3.curveStep)(counts));
+  const brush = d3.brushX().extent([[m.l, m.t], [W - m.r, H - m.b]])
+    .on("brush", ev => { if (ev.selection) $("#rangeLabel").textContent = labelRange(snap(ev.selection)); })
+    .on("end", ev => {
+      if (!ev.sourceEvent) return;                         // ignore our own programmatic moves
+      const r = ev.selection ? snap(ev.selection) : [0, CFG.nMonths - 1];
+      STATE.range = r; update(false);
+      if (!ev.selection) renderBrush();                    // a plain click clears the brush: show the full period again
+    });
+  const snap = sel => { let a = Math.round(x.invert(sel[0])), b = Math.round(x.invert(sel[1])) - 1; a = Math.max(0, Math.min(a, CFG.nMonths - 1)); b = Math.max(a, Math.min(b, CFG.nMonths - 1)); return [a, b]; };
+  const g = svg.append("g").call(brush); g.select(".overlay").style("touch-action", "none"); g.select(".selection").attr("fill", "#0d366b").attr("fill-opacity", .18).attr("stroke", "#0d366b");
+  g.call(brush.move, [x(STATE.range[0]), x(STATE.range[1] + 1)]);
+  $("#rangeLabel").textContent = labelRange(STATE.range);
+}
+const labelRange = r => monthName(r[0]) + " – " + monthName(r[1]) + " · " + (r[1] - r[0] + 1) + " months";
+
+/* 5b. Growth rings: one ring per year, one spoke per community, one circle per community and year.
+       The same circles can be unrolled into a straight grid (rows = communities, columns = years). */
+const CITY = {};
+const short = c => (c.project && c.project.length < 26 ? title(c.project) : c.name).replace("Jumeirah Village Circle", "JVC").replace(" Master Community", "");
+const N_YEARS = Math.ceil(CFG.nMonths / 12);
+function setupCity() {
+  const svg = d3.select("#citySvg");
+  CITY.gGuide = svg.append("g").style("pointer-events", "none");         // rings, year labels, band arcs
+  CITY.gBub = svg.append("g");                                           // the circles
+  CITY.gLbl = svg.append("g").style("pointer-events", "none");           // community names
+  CITY.gTop = svg.append("g").style("pointer-events", "none");           // the number in the middle
+  CITY.clock = svg.append("text").attr("text-anchor", "end").attr("font-size", 30).attr("font-weight", 700).attr("fill", "#0b0b0b").attr("opacity", .2).style("pointer-events", "none");   // the date while playing
+}
+function sizeCity() {
+  const W = $("#cityWrap").clientWidth, H = Math.round(W < 560 ? W * 1.06 : Math.min(680, W * .9));
+  CITY.W = W; CITY.H = H; d3.select("#citySvg").attr("viewBox", `0 0 ${W} ${H}`);
+}
+/* one row per community that has enough sales, with its sales counted year by year */
+function ringData() {
+  const st = STATE, by = d3.group(VIEW.F, d => d.comm), rows = [];
+  for (const c of DATA.comms) {
+    const r = by.get(c.id); if (!r || r.length < st.minN) continue;
+    const yr = d3.range(N_YEARS).map(() => ({ n: 0, off: 0, p: [] })); let wOff = 0, nOff = 0, wAll = 0;
+    for (const d of r) { const y = yr[Math.floor(d.m / 12)]; y.n++; y.p.push(d.ppm); wAll += d.m; if (d.off) { y.off++; nOff++; wOff += d.m; } }
+    rows.push({ c, id: c.id, n: r.length, wave: nOff >= 10 ? wOff / nOff : wAll / r.length, yr });    // wave = the average month of its off-plan sales
+  }
+  return rows;
+}
+function cellVal(M, d) {                         // the value behind a circle's colour
+  if (M.key === "dist") return d.row.c.km;
+  if (d.y.n < 5) return null;                    // too few sales in that year to rate
+  return M.key === "offshare" ? d.y.off / d.y.n : d3.median(d.y.p);
+}
+function cellTip(d) {
+  const y = d.y, c = d.row.c, yr = CFG.y0 + d.k;
+  return `<b>${c.name}</b><br><span class="muted">${yr}${d.k === N_YEARS - 1 ? " (January to August)" : ""}</span><table>
+    <tr><td>Sales in that year</td><td>${fInt(y.n)}</td></tr><tr><td>Off-plan share</td><td>${fPct(y.off / y.n)}</td></tr>
+    <tr><td>Median price / m²</td><td>${y.n >= 5 ? "AED " + fPm(d3.median(y.p)) : "too few sales"}</td></tr>
+    <tr><td>Nearest metro</td><td>${c.km.toFixed(1)} km</td></tr><tr><td>All sales 2015–2026</td><td>${fInt(d.row.n)}</td></tr></table>`;
+}
+function renderCity(animate) {
+  const st = STATE, M = VIEW.metric, { W, H } = CITY, dur = animate ? DUR() : (DUR() ? 250 : 0), nY = N_YEARS;
+  const planner = st.persona === "planner", rings = st.layout === "rings", narrow = W < 560;
+  /* the order of the spokes is the lens: by distance to the metro (planner) or by the time of the off-plan wave (developer) */
+  const rows = ringData().sort(planner ? (a, b) => a.c.km - b.c.km : (a, b) => a.wave - b.wave);
+  rows.forEach((r, i) => r.i = i);
+  const N = rows.length || 1;
+  /* geometry of the two layouts */
+  const cx = W / 2, cy = H / 2 + 4, R = Math.min(W, H) / 2 - (narrow ? 58 : 74), r0 = R * .2, gap = .46;      // gap = radians left free at 12 o'clock for the year labels
+  const ang = i => gap / 2 + (i + .5) / N * (2 * Math.PI - gap), rad = k => r0 + (k + .5) / nY * (R - r0), step = (R - r0) / nY;
+  const m = { l: narrow ? 100 : 176, r: 14, t: 32, b: 12 }, gx = k => m.l + (k + .5) / nY * (W - m.l - m.r), gy = i => m.t + (i + .5) / N * (H - m.t - m.b);
+  const pos = (i, k) => rings ? [cx + rad(k) * Math.sin(ang(i)), cy - rad(k) * Math.cos(ang(i))] : [gx(k), gy(i)];
+  const maxN = d3.max(rows, r => d3.max(r.yr, y => y.n)) || 1, rMax = rings ? step * 1.05 : Math.min((W - m.l - m.r) / nY * .4, 15);
+  const inP = k => k * 12 <= st.range[1] && k * 12 + 11 >= st.range[0];                                        // does year k touch the selected period?
+  const cells = rows.flatMap(r => r.yr.map((y, k) => ({ key: r.id + "-" + k, id: r.id, row: r, k, y })).filter(d => d.y.n > 0));
+  const selRow = rows.find(r => r.id === st.sel);
+
+  /* --- guides: rings or grid lines, year labels, the selected period, the distance bands --- */
+  const g = CITY.gGuide; g.selectAll("*").remove();
+  const arc = d3.arc(), a0 = gap / 2, a1 = 2 * Math.PI - gap / 2;
+  if (rings) {
+    const G = g.append("g").attr("transform", `translate(${cx},${cy})`);
+    d3.range(nY).forEach(k => {
+      if (inP(k)) G.append("path").attr("d", arc({ innerRadius: rad(k) - step / 2, outerRadius: rad(k) + step / 2, startAngle: a0, endAngle: a1 })).attr("fill", "#0d366b").attr("opacity", .07);
+      G.append("path").attr("d", arc({ innerRadius: rad(k) + step / 2, outerRadius: rad(k) + step / 2, startAngle: a0, endAngle: a1 })).attr("fill", "none").attr("stroke", "#e3e2dc");
+      if (step >= 13 || k % 2 === 1 || k === nY - 1) G.append("text").attr("class", "note").attr("y", -rad(k)).attr("dy", ".35em").attr("text-anchor", "middle").style("font-weight", inP(k) ? 700 : 400).style("fill", inP(k) ? "#0d366b" : null).text("’" + String(CFG.y0 + k).slice(2));
+    });
+    if (planner) {                                  // an outer band shows which spokes belong to which distance band
+      d3.groups(rows, r => bandOf(r.c.km)).forEach(([b, rs]) => { const h = (2 * Math.PI - gap) / N / 2;
+        G.append("path").attr("d", arc({ innerRadius: R + 5, outerRadius: R + 11, startAngle: ang(rs[0].i) - h + .006, endAngle: ang(rs[rs.length - 1].i) + h - .006 })).attr("fill", COL.bandCols[b]); });
+      G.append("text").attr("class", "note").attr("x", 14).attr("y", 14 - cy).style("font-weight", 600).text("↻ nearest to the metro");
+      G.append("text").attr("class", "note").attr("x", -14).attr("y", 14 - cy).attr("text-anchor", "end").style("font-weight", 600).text("furthest from the metro");
+    } else {
+      G.append("path").attr("d", arc({ innerRadius: R + 8, outerRadius: R + 8, startAngle: a0, endAngle: a1 })).attr("fill", "none").attr("stroke", "#b9b8b1");
+      G.append("text").attr("class", "note").attr("x", 14).attr("y", 14 - cy).style("font-weight", 600).text("↻ launched first");
+      G.append("text").attr("class", "note").attr("x", -14).attr("y", 14 - cy).attr("text-anchor", "end").style("font-weight", 600).text("launched last");
+    }
+    if (selRow) G.append("line").attr("x1", (r0 - 4) * Math.sin(ang(selRow.i))).attr("y1", -(r0 - 4) * Math.cos(ang(selRow.i))).attr("x2", (R + 3) * Math.sin(ang(selRow.i))).attr("y2", -(R + 3) * Math.cos(ang(selRow.i))).attr("stroke", "#0b0b0b").attr("stroke-width", 1).attr("opacity", .45);
+  } else {
+    d3.range(nY).forEach(k => {
+      if (inP(k)) g.append("rect").attr("x", gx(k) - (W - m.l - m.r) / nY / 2).attr("width", (W - m.l - m.r) / nY).attr("y", m.t - 6).attr("height", H - m.t - m.b + 6).attr("fill", "#0d366b").attr("opacity", .07);
+      g.append("text").attr("class", "note").attr("x", gx(k)).attr("y", 16).attr("text-anchor", "middle").style("font-weight", inP(k) ? 700 : 400).style("fill", inP(k) ? "#0d366b" : null).text(narrow ? "’" + String(CFG.y0 + k).slice(2) : CFG.y0 + k);
+    });
+    if (planner) d3.groups(rows, r => bandOf(r.c.km)).forEach(([b, rs]) => { const hh = (H - m.t - m.b) / N / 2;
+      g.append("rect").attr("x", m.l - 9).attr("width", 5).attr("rx", 2).attr("y", gy(rs[0].i) - hh + 1).attr("height", Math.max(2, gy(rs[rs.length - 1].i) - gy(rs[0].i) + 2 * hh - 2)).attr("fill", COL.bandCols[b]); });
+    if (!narrow) g.append("text").attr("class", "note").attr("x", 4).attr("y", m.t - 14).text(planner ? "↓ further from the metro" : "↓ launched later");
+    if (selRow) g.append("line").attr("x1", m.l - 12).attr("x2", W - m.r).attr("y1", gy(selRow.i)).attr("y2", gy(selRow.i)).attr("stroke", "#0b0b0b").attr("opacity", .45);
+  }
+  if (animate) g.style("opacity", 0).transition().delay(dur * .6).duration(350).style("opacity", 1); else g.style("opacity", 1);
+
+  /* --- the number in the middle of the rings: the answer for the selected period --- */
+  CITY.gTop.selectAll("*").remove();
+  if (rings && !narrow) {
+    const per = VIEW.Fr.filter(d => d.km != null), v = planner ? (per.length ? d3.mean(per, d => d.km < 2 ? 1 : 0) : null) : VIEW.city.off;
+    const T = CITY.gTop.append("g").attr("transform", `translate(${cx},${cy})`).attr("text-anchor", "middle");
+    T.append("text").attr("y", -2).attr("font-size", 24).attr("font-weight", 700).attr("fill", planner ? "#0d366b" : "#a23a10").text(v != null ? fPct(v) : "n/a");
+    T.append("text").attr("class", "note").attr("y", 13).text(planner ? "within 2 km" : "off-plan");
+    T.append("text").attr("class", "note").attr("y", 25).text("in the period");
+  }
+
+  /* --- the circles: the SAME elements in both lenses and both layouts, so they can travel (object constancy) --- */
+  CITY.gBub.selectAll("circle").data(cells, d => d.key).join(
+      en => en.append("circle").attr("class", "bubble").attr("cx", d => pos(d.row.i, d.k)[0]).attr("cy", d => pos(d.row.i, d.k)[1]).attr("r", 0),
+      up => up.classed("gone", false), ex => ex.classed("gone", true).style("pointer-events", "none").transition().duration(DUR() ? 300 : 0).attr("r", 0).remove())
+    .classed("dim", d => st.hi && !st.hi.has(d.id))
+    .style("stroke", d => d.id === st.sel ? "#0b0b0b" : M.key === "dist" ? "#5f93d6" : "#fff").style("stroke-width", d => d.id === st.sel ? "1.5px" : ".7px")
+    .on("pointermove", (ev, d) => showTip(ev, cellTip(d))).on("pointerleave", hideTip).on("click", (ev, d) => select(d.id))
+    .sort((a, b) => b.y.n - a.y.n);                                      // big circles first, so small ones stay on top
+  const live = CITY.gBub.selectAll("circle:not(.gone)");
+  (dur ? live.transition().duration(dur).delay(animate ? d => d.row.i * 4 : 0).ease(d3.easeCubicInOut) : live.interrupt())
+    .attr("cx", d => pos(d.row.i, d.k)[0]).attr("cy", d => pos(d.row.i, d.k)[1]).attr("r", d => Math.max(1.3, Math.sqrt(d.y.n / maxN) * rMax))
+    .attr("fill", d => { const v = cellVal(M, d); return v != null ? M.color(v) : "#d8d6ce"; }).style("opacity", d => inP(d.k) ? .93 : .42);
+
+  /* --- direct labels: the biggest few communities and the selected one --- */
+  const lab = [], minGap = rings ? 2 : 3;                                // never two labels on neighbouring spokes or rows
+  (selRow ? [selRow] : []).concat(d3.sort(rows, r => -r.n)).forEach(r => { if (lab.length < (narrow ? 5 : 10) && !lab.some(q => Math.abs(q.i - r.i) < minGap)) lab.push(r); });
+  const L = CITY.gLbl.selectAll("text").data(lab, d => d.id).join("text").attr("class", "lbl").text(d => { const t = short(d.c); const k = narrow ? 10 : 15; return t.length > k ? t.slice(0, k - 1) + "…" : t; })
+    .style("font-weight", d => d.id === st.sel ? 700 : 400).style("opacity", 0);
+  if (rings) L.attr("transform", d => { const a = ang(d.i), rr = R + (planner ? 15 : 12), deg = a * 180 / Math.PI - 90, left = a > Math.PI;
+      return `translate(${cx + rr * Math.sin(a)},${cy - rr * Math.cos(a)}) rotate(${left ? deg + 180 : deg})`; }).attr("text-anchor", d => ang(d.i) > Math.PI ? "end" : "start").attr("x", 0).attr("y", 0).attr("dy", ".35em");
+  else L.attr("transform", null).attr("text-anchor", "end").attr("x", m.l - 14).attr("y", d => gy(d.i)).attr("dy", ".35em");
+  if (dur > 300) L.transition().delay(dur).duration(300).style("opacity", 1); else L.style("opacity", 1);
+
+  /* --- captions --- */
+  $("#cityHint").textContent = "tap a circle to select its community · the same circles in both layouts";
+  $("#v1Sub").innerHTML = rings
+    ? "<b>Growth rings.</b> Like the rings of a tree: every ring is a year, from 2015 in the middle to 2026 on the outside. Every spoke is one community, and every circle is its sales in that year. " + (planner ? "The spokes run clockwise from the communities nearest to a metro station to those furthest away. Compare the inner rings with the outer rings on each side." : "The spokes run clockwise from the communities that launched first to those that launched last. Early communities have circles in every ring, now pale (resales). Late ones are empty inside and dark outside: the new launches.")
+    : "<b>Unrolled.</b> The same circles on a straight grid: one row per community, one column per year. The rings show the pattern; the grid is easier to read exactly.";
+  let h = `<b>${M.label}</b>` + M.legend.map((t, i) => `<span><i class="sw" style="background:${M.cols[i]}"></i>${t}</span>`).join("");
+  if (M.key !== "dist") h += `<span><i class="sw" style="background:#d8d6ce"></i>under 5 sales in that year</span>`;
+  h += `<span>◯ circle area = sales in that year</span><span>faded = outside the selected period</span>`;
+  if (planner && M.key !== "dist") h += `<span>outer band = distance to the metro, dark = near</span>`;
+  if (st.pinBand != null) h += `<span style="flex-basis:100%"><b>Highlighted:</b> communities ${CFG.bandNames[st.pinBand]} from a station. </span><button class="btn" id="clearPin" type="button">Clear highlight</button>`;
+  $("#cityLegend").innerHTML = h + `<span style="flex-basis:100%">${rows.length} communities with at least ${st.minN} sales since 2015. ${M.key === "dist" ? "Distance = straight line from the area centre to the nearest station (2020 network)" : M.key === "offshare" ? "Colour = share of that year's sales registered as off-plan" : "Colour = median price per m² of that year, in " + M.note}. 2026 covers January to August.</span>`;
+  if (st.pinBand != null) $("#clearPin").onclick = () => { STATE.pinBand = null; update(false); };
+}
+
+/* 5c. Ranked list (length on a common scale answers "which is highest" instantly) */
+function renderRank() {
+  /* each lens gets the ranking that answers its question; a row = { c, n, bar (length), val (right text), sub, col } */
+  const M = VIEW.metric, st = STATE, stats = VIEW.stats, all = DATA.comms.map(c => ({ c, s: stats.get(c.id) })).filter(d => d.s.n > 0);
+  let rows, head, empty = "No community has enough matching sales. Widen the period or lower the minimum.";
+  if (M.key === "afford") {            // buyer: where the chosen home's median is within budget, most traded first
+    rows = d3.sort(all.filter(d => d.s.homeMed != null && d.s.homeMed <= st.budget), d => -d.s.nMatch).slice(0, 8)
+      .map(d => ({ c: d.c, bar: d.s.nMatch, val: "AED " + fAED(d.s.homeMed), sub: d.s.nMatch + " sales · " + Math.round(d.s.homeSize) + " m²", col: "#1baf7a" }));
+    head = "Within budget, most traded first · " + st.rooms; empty = "No community's median " + st.rooms + " is within this budget. Raise the budget or change bedrooms.";
+  } else if (M.key === "offshare") {   // developer: where the off-plan sales are, not just the highest percentage
+    rows = d3.sort(all.filter(d => d.s.ok), d => -d.s.off * d.s.n).slice(0, 8)
+      .map(d => ({ c: d.c, bar: d.s.off * d.s.n, val: fPct(d.s.off), sub: fInt(Math.round(d.s.off * d.s.n)) + " off-plan sales", col: M.color(d.s.off) }));
+    head = "Most off-plan sales in the period";
+  } else if (M.key === "dist") {       // planner: the busiest communities far from any station
+    rows = d3.sort(all.filter(d => d.c.km > 4), d => -d.s.n).slice(0, 8)
+      .map(d => ({ c: d.c, bar: d.s.n, val: d.c.km.toFixed(1) + " km", sub: fInt(d.s.n) + " sales", col: M.color(d.c.km) }));
+    head = "Busiest 8 more than 4 km from a station";
+  } else {                             // every other measure: highest value first, ties broken by sales
+    rows = d3.sort(all.map(d => Object.assign(d, { v: metricVal(d.c) })).filter(d => d.v != null), (p, q) => d3.descending(p.v, q.v) || d3.descending(p.s.n, q.s.n)).slice(0, 8)
+      .map(d => ({ c: d.c, bar: Math.abs(d.v), val: M.fmt(d.v), sub: fInt(d.s.n) + " sales", col: M.color(d.v) }));
+    head = "Top 8 · " + M.label.toLowerCase();
+  }
+  const max = d3.max(rows, d => d.bar) || 1;
+  $("#rankTitle").textContent = head;
+  d3.select("#rank").selectAll("p").remove();
+  d3.select("#rank").selectAll("div.rank-row").data(rows, d => d.c.id).join("div").attr("class", "rank-row").classed("on", d => d.c.id === st.sel)
+    .html(d => `<div><div class="nm">${short(d.c)} <span class="muted small">· ${d.sub}</span></div><div class="rank-bar" style="width:${Math.max(2, d.bar / max * 100)}%;background:${d.col}"></div></div><div class="rank-val">${d.val}</div>`)
+    .on("click", (ev, d) => select(d.c.id))
+    .on("pointerenter", (ev, d) => { if (ev.pointerType === "mouse") setHi(new Set([d.c.id])); }).on("pointerleave", ev => { if (ev.pointerType === "mouse") setHi(null); });
+  if (!rows.length) $("#rank").innerHTML = `<p class="small muted">${empty}</p>`;
+}
+
+/* 5d. Selected community: key numbers and its own spoke as a bar chart */
+function renderProfile() {
+  const st = STATE, c = DATA.commById.get(st.sel), s = VIEW.stats.get(c.id), box = d3.select("#profile");
+  const rows = VIEW.F.filter(d => d.comm === c.id), yr = d3.range(N_YEARS).map(k => ({ k, off: 0, rdy: 0 }));
+  rows.forEach(d => { const o = yr[Math.floor(d.m / 12)]; if (d.off) o.off++; else o.rdy++; });
+  const best = d3.greatest(yr, d => d.off + d.rdy), named = c.project && c.project.length < 34;
+  box.html(`<div class="tag">Selected community</div><h3 style="font-size:17px;margin:0">${named ? title(c.project) : c.name}</h3>
+    <div class="small muted">${named && title(c.project) !== c.name ? "DLD area " + c.name + " · " : ""}Dubai Municipality community ${c.id} (${c.dm})</div>
+    <div class="tiles">
+      <div class="tile"><div class="v">${fInt(s.n)}</div><div class="k">sales in period</div></div>
+      <div class="tile"><div class="v">${s.n ? fPct(s.off) : "n/a"}</div><div class="k">off-plan share</div></div>
+      <div class="tile"><div class="v">${c.km.toFixed(1)} km</div><div class="k">to nearest metro</div></div>
+      <div class="tile"><div class="v">${fInt(rows.length)}</div><div class="k">sales since 2015</div></div>
+      <div class="tile"><div class="v">${rows.length ? CFG.y0 + best.k : "n/a"}</div><div class="k">busiest year</div></div>
+      <div class="tile"><div class="v">${s.ok ? fPm(s.med) : "n/a"}</div><div class="k">median AED / m²</div></div>
+    </div>
+    <h3 style="margin-top:10px">Its spoke, as bars <span class="muted" style="font-weight:400">· sales per year · <b style="color:var(--offplan)">off-plan</b> on top of <b style="color:var(--ready)">existing</b></span></h3><svg id="pYears"></svg>`);
+  const W = box.node().clientWidth - 24, H = 170, m = { l: 34, r: 6, t: 8, b: 20 }, svg = d3.select("#pYears").attr("viewBox", `0 0 ${W} ${H}`);
+  const x = d3.scaleBand(d3.range(N_YEARS), [m.l, W - m.r]).padding(.2), y = d3.scaleLinear([0, d3.max(yr, d => d.off + d.rdy) || 1], [H - m.b, m.t]).nice(4);
+  const inP = k => k * 12 <= st.range[1] && k * 12 + 11 >= st.range[0];
+  svg.selectAll("rect.p").data(yr.filter(d => inP(d.k))).join("rect").attr("class", "p").attr("x", d => x(d.k) - x.step() * .1).attr("width", x.step()).attr("y", m.t).attr("height", H - m.b - m.t).attr("fill", "#0d366b").attr("opacity", .07);
+  svg.append("g").attr("class", "grid").attr("transform", `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(4).tickSize(-(W - m.l - m.r)).tickFormat(""));
+  svg.append("g").attr("class", "axis").attr("transform", `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(4, "~s")).call(g => g.select(".domain").remove());
+  svg.append("g").attr("class", "axis").attr("transform", `translate(0,${H - m.b})`).call(d3.axisBottom(x).tickFormat(k => "’" + String(CFG.y0 + k).slice(2)).tickSizeOuter(0));
+  const g = svg.append("g").selectAll("g").data(yr).join("g")
+    .on("pointermove", (ev, d) => showTip(ev, `<b>${CFG.y0 + d.k}${d.k === N_YEARS - 1 ? " (Jan–Aug)" : ""}</b><table><tr><td>Off-plan sales</td><td>${fInt(d.off)}</td></tr><tr><td>Existing-home sales</td><td>${fInt(d.rdy)}</td></tr></table>`)).on("pointerleave", hideTip);
+  g.append("rect").attr("x", d => x(d.k)).attr("width", x.bandwidth()).attr("y", d => y(d.rdy)).attr("height", d => y(0) - y(d.rdy)).attr("fill", COL.ready);
+  g.append("rect").attr("x", d => x(d.k)).attr("width", x.bandwidth()).attr("y", d => y(d.rdy + d.off)).attr("height", d => Math.max(0, y(d.rdy) - y(d.rdy + d.off) - 1)).attr("fill", COL.offplan);
+}
+
+/* 5f. Share of sales by distance to the metro (normalised stacked area by year) */
+function renderBands() {
+  const st = STATE, wrap = $("#bandSvg").parentNode, W = wrap.clientWidth - 24, H = 400, m = { l: 38, r: W < 420 ? 12 : 86, t: 14, b: 28 };
+  const svg = d3.select("#bandSvg").attr("viewBox", `0 0 ${W} ${H}`); svg.selectAll("*").remove();
+  const years = d3.range(CFG.y0, CFG.y0 + Math.ceil(CFG.nMonths / 12));
+  const tab = years.map(yr => { const r = VIEW.F.filter(d => Math.floor(d.m / 12) + CFG.y0 === yr && d.km != null), o = { yr, n: r.length, med: [] };
+    for (let b = 0; b < 5; b++) { const rb = r.filter(d => bandOf(d.km) === b); o[b] = r.length ? rb.length / r.length : 0; o.med[b] = d3.median(rb, d => d.ppm); } return o; });
+  const x = d3.scaleLinear([years[0], years[years.length - 1]], [m.l, W - m.r]), y = d3.scaleLinear([0, 1], [H - m.b, m.t]);
+  const series = d3.stack().keys([0, 1, 2, 3, 4])(tab);
+  const area = d3.area().x(d => x(d.data.yr)).y0(d => y(d[0])).y1(d => y(d[1])).curve(d3.curveMonotoneX);
+  svg.selectAll("path.band").data(series).join("path").attr("class", "band").attr("d", area).attr("fill", (d, i) => COL.bandCols[i]).attr("stroke", "#fcfcfb").attr("stroke-width", 2).style("cursor", "pointer")
+    .on("pointermove", (ev, d) => { const yr = Math.max(years[0], Math.min(years[years.length - 1], Math.round(x.invert(d3.pointer(ev)[0])))), t = tab.find(e => e.yr === yr);
+      showTip(ev, `<b>${yr}${yr === 2026 ? " (Jan–Aug)" : ""}</b> · ${fInt(t.n)} sales<table>${CFG.bandNames.map((nm, b) => `<tr style="${b === d.index ? "font-weight:700" : ""}"><td><i class="sw" style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${COL.bandCols[b]}"></i> ${nm}</td><td>${fPct(t[b])}</td><td>${t.med[b] ? fPm(t.med[b]) + "/m²" : ""}</td></tr>`).join("")}</table>`);
+      svg.selectAll("path.band").attr("opacity", e => e.index === d.index || e.index === st.pinBand ? 1 : .45); })
+    .on("pointerleave", () => { hideTip(); svg.selectAll("path.band").attr("opacity", e => st.pinBand == null || e.index === st.pinBand ? 1 : .45); })
+    .on("click", (ev, d) => { hideTip(); st.pinBand = st.pinBand === d.index ? null : d.index; update(false); if (st.pinBand != null) showStage(); });
+  svg.selectAll("path.band").attr("opacity", e => st.pinBand == null || e.index === st.pinBand ? 1 : .45).attr("stroke", e => e.index === st.pinBand ? "#0b0b0b" : "#fcfcfb");
+  svg.append("g").attr("class", "axis").attr("transform", `translate(0,${H - m.b})`).call(d3.axisBottom(x).ticks(W < 420 ? 4 : 6).tickFormat(v => v === 2026 ? "2026*" : v).tickSizeOuter(0));
+  svg.append("g").attr("class", "axis").attr("transform", `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(5, "%")).call(g => g.select(".domain").remove());
+  /* shade outside the selected period so the link with the brush is visible */
+  const xa = x(Math.max(years[0], CFG.y0 + st.range[0] / 12 - .5)), xb = x(Math.min(years[years.length - 1], CFG.y0 + (st.range[1] + 1) / 12 - .5));
+  svg.append("rect").attr("x", m.l).attr("width", Math.max(0, xa - m.l)).attr("y", m.t).attr("height", H - m.b - m.t).attr("fill", "#fcfcfb").attr("opacity", .6).style("pointer-events", "none");
+  svg.append("rect").attr("x", xb).attr("width", Math.max(0, W - m.r - xb)).attr("y", m.t).attr("height", H - m.b - m.t).attr("fill", "#fcfcfb").attr("opacity", .6).style("pointer-events", "none");
+  if (W >= 420) svg.selectAll("text.end").data(series).join("text").attr("class", "note end").attr("x", W - m.r + 6).attr("y", d => y((d[d.length - 1][0] + d[d.length - 1][1]) / 2)).attr("dy", ".35em").text((d, i) => CFG.bandNames[i]);
+  const first = tab[0], last = tab[tab.length - 1];
+  $("#bandLegend").innerHTML = CFG.bandNames.map((t, i) => `<span><i class="sw" style="background:${COL.bandCols[i]}"></i>${t}</span>`).join("") +
+    `<span style="flex-basis:100%">Within 2 km of a station: <b>${fPct(first[0] + first[1])}</b> of sales in ${first.yr} → <b>${fPct(last[0] + last[1])}</b> in ${last.yr}. Over 8 km: <b>${fPct(first[4])}</b> → <b>${fPct(last[4])}</b>. *2026 covers January to August; shares are unaffected. Distances use the 2020 network for every year.</span>`;
+}
+
+/* 5g. Launch waves: ridgeline of master developments */
+function renderWaves() {
+  const st = STATE, wrapW = $("#waveSvg").parentNode.clientWidth, W = Math.max(wrapW, 640), narrow = wrapW < 700;
+  const nQ = Math.ceil(CFG.nMonths / 3), rows = VIEW.F.filter(d => d.mp), by = d3.group(rows, d => d.mp);
+  let proj = [...by].map(([name, r]) => { const off = new Array(nQ).fill(0), rdy = new Array(nQ).fill(0); let so = 0, sw = 0, sr = 0, swr = 0;
+    for (const d of r) { if (d.off) { off[d.q]++; so++; sw += d.q; } else { rdy[d.q]++; sr++; swr += d.q; } }
+    return { name, n: r.length, off, rdy, nOff: so, peak: so >= 10 ? sw / so : (sr ? swr / sr : 0) + 100 * (so < 10), max: Math.max(d3.max(off), d3.max(rdy)), comm: d3.greatest(d3.rollup(r, v => v.length, d => d.comm), d => d[1])[0] }; });
+  proj = d3.sort(d3.sort(proj, d => -d.n).slice(0, narrow ? 18 : 26), d => d.peak);
+  const rowH = 26, amp = rowH * 1.55, m = { l: narrow ? 128 : 190, r: 14, t: amp + 4, b: 26 }, H = m.t + rowH * proj.length + m.b;
+  const svg = d3.select("#waveSvg").attr("viewBox", `0 0 ${W} ${H}`).style("width", W + "px"); svg.selectAll("*").remove();
+  const x = d3.scaleLinear([0, nQ - 1], [m.l, W - m.r]), gMax = d3.max(proj, d => d.max) || 1;
+  const hOf = (d, v) => v / (st.waveScale === "row" ? d.max || 1 : gMax) * amp;
+  WAVE.x = x;
+  svg.append("g").attr("class", "axis").attr("transform", `translate(0,${H - m.b})`).call(d3.axisBottom(x).tickValues(d3.range(0, nQ, narrow ? 8 : 4)).tickFormat(v => CFG.y0 + v / 4).tickSizeOuter(0));
+  svg.append("g").attr("class", "grid").selectAll("line").data(d3.range(0, nQ, 4)).join("line").attr("x1", d => x(d)).attr("x2", d => x(d)).attr("y1", 8).attr("y2", H - m.b);
+  svg.append("text").attr("class", "note").attr("x", x(nQ - 1)).attr("y", H - 2).attr("text-anchor", "end").text("last quarter = Jul–Aug 2026 only");
+  const g = svg.selectAll("g.ridge").data(proj, d => d.name).join("g").attr("class", "ridge").attr("transform", (d, i) => `translate(0,${m.t + i * rowH + rowH})`).style("cursor", "pointer");
+  const idx = d3.range(nQ);
+  g.append("path").attr("fill", "#fcfcfb").attr("d", d => d3.area().x(i => x(i)).y0(1).y1(i => -Math.max(hOf(d, d.off[i]), hOf(d, d.rdy[i]))).curve(d3.curveBasis)(idx));   // mask: a ridge covers the rows behind it
+  g.append("path").attr("fill", COL.offplan).attr("fill-opacity", .88).attr("stroke", "#fcfcfb").attr("stroke-width", 1.2)
+    .attr("d", d => d3.area().x(i => x(i)).y0(0).y1(0).curve(d3.curveBasis)(idx))
+    .transition().duration(DUR()).delay((d, i) => i * 25).attr("d", d => d3.area().x(i => x(i)).y0(0).y1(i => -hOf(d, d.off[i])).curve(d3.curveBasis)(idx));
+  g.append("path").attr("fill", "none").attr("stroke", COL.ready).attr("stroke-width", 1.6).attr("d", d => d3.line().x(i => x(i)).y(i => -hOf(d, d.rdy[i])).curve(d3.curveBasis)(idx));
+  g.append("line").attr("x1", m.l).attr("x2", W - m.r).attr("stroke", "#cfcec7");
+  g.append("text").attr("x", m.l - 8).attr("y", -3).attr("text-anchor", "end").attr("font-size", narrow ? 11 : 12).attr("font-weight", d => d.name === st.dev ? 700 : 400).attr("fill", COL.ink)
+    .text(d => { const t = title(d.name).replace(/\s+/g, " ").replace(" - JBR", " (JBR)"), k = narrow ? 19 : 28; return t.length > k ? t.slice(0, k - 1) + "…" : t; });
+  const cross = svg.append("line").attr("y1", 8).attr("y2", H - m.b).attr("stroke", COL.ink2).style("opacity", 0).style("pointer-events", "none");
+  svg.append("rect").attr("id", "waveShade").attr("x", x(st.range[0] / 3)).attr("width", Math.max(2, x((st.range[1] + 1) / 3 - .34) - x(st.range[0] / 3))).attr("y", 4).attr("height", H - m.b - 4)
+    .attr("fill", "#0d366b").attr("opacity", .1).attr("stroke", "#0d366b").attr("stroke-opacity", .5).style("pointer-events", "none");            // the selected period (and the playhead)
+  g.append("rect").attr("x", 0).attr("width", W).attr("y", -rowH).attr("height", rowH).attr("fill", "transparent")
+    .on("pointermove", (ev, d) => { const i = Math.max(0, Math.min(nQ - 1, Math.round(x.invert(d3.pointer(ev, svg.node())[0])))); cross.attr("x1", x(i)).attr("x2", x(i)).style("opacity", 1);
+      showTip(ev, `<b>${title(d.name)}</b><br><span class="muted">${quarterName(i)}${i === nQ - 1 ? " (Jul–Aug only)" : ""}</span><table><tr><td><i class="sw" style="display:inline-block;width:9px;height:9px;background:${COL.offplan}"></i> Off-plan sales</td><td>${d.off[i]}</td></tr><tr><td><i class="sw" style="display:inline-block;width:9px;height:9px;background:${COL.ready}"></i> Existing-home sales</td><td>${d.rdy[i]}</td></tr><tr><td>All sales, 2015–2026</td><td>${fInt(d.n)}</td></tr></table>`); })
+    .on("pointerleave", () => { cross.style("opacity", 0); hideTip(); })
+    .on("click", (ev, d) => { STATE.dev = d.name; STATE.sel = d.comm; update(false); showStage(); });
+}
+
+
+/* ---------- persona-specific views ---------- */
+const CMP_COL = ["#2a78d6", "#eb6834", "#1baf7a"];       // shortlist slots (colour follows the slot, never the rank)
+const inRange = d => d.m >= STATE.range[0] && d.m <= STATE.range[1];
+
+
+
+
+/* PLAY: a 12-month window slides from 2015 to 2026 and the circles follow it, in either lens */
+let PLAY = null; const WAVE = {};
+function shadeWaves() { if (!WAVE.x) return; const r = STATE.range;
+  d3.select("#waveShade").attr("x", WAVE.x(r[0] / 3)).attr("width", Math.max(2, WAVE.x((r[1] + 1) / 3 - .34) - WAVE.x(r[0] / 3))); }
+function stopPlay() { if (PLAY) { clearInterval(PLAY); PLAY = null; } STATE.playMax = null; CITY.clock.text(""); $("#playBtn").textContent = "▶ Play 2015 → 2026"; }
+function togglePlay() {
+  if (PLAY) { stopPlay(); update(false); return; }
+  let a = 0; $("#playBtn").textContent = "■ Stop";
+  /* one size scale for the whole film: the busiest 12 months of any community, so circles really grow over the years */
+  const cnt = new Map(); for (const d of VIEW.F) { let m = cnt.get(d.comm); if (!m) cnt.set(d.comm, m = new Array(CFG.nMonths).fill(0)); m[d.m]++; }
+  let mx = 1; for (const m of cnt.values()) { let run = 0; for (let i = 0; i < m.length; i++) { run += m[i]; if (i >= 12) run -= m[i - 12]; if (run > mx) mx = run; } }
+  STATE.playMax = mx;
+  PLAY = setInterval(() => {
+    if (a + 11 > CFG.nMonths - 1) { stopPlay(); STATE.range = [CFG.nMonths - 12, CFG.nMonths - 1]; renderBrush(); update(false); return; }   // finish on the latest 12 months
+    STATE.range = [a, a + 11]; a += 3;                       // slide by one quarter
+    CITY.clock.attr("x", CITY.W - 16).attr("y", CITY.H - 18).text("12 months to " + monthName(STATE.range[1]));
+    compute(); renderCity(false); renderRank(); renderBrush();                  // only the light views are redrawn while playing
+    if (STATE.persona === "planner") renderBands(); else shadeWaves();
+  }, 560);
+}
+
+/* 5h. Data-quality text: cleaning steps and the table of problems, counted live */
+function renderLedger() {
+  const L = DATA.L, st = STATE;
+  const steps = [
+    { k: "1. All rows in the file", n: L.all, rm: 0 },
+    { k: "2. Remove sales before 2015 (too few to trust; the first is from " + L.minDate.slice(0, 4) + ")", n: L.all - L.old - L.baddate, rm: L.old + L.baddate },
+    { k: "3. Remove September 2026 (the month is not complete)", n: L.window, rm: L.future },
+    { k: "4. Remove mortgages and gifts (they have no market price)", n: L.window - L.notSale, rm: L.notSale },
+    { k: "5. Remove land and whole buildings (not comparable per m²)", n: L.base, rm: L.notHome },
+    { k: "6. Remove errors: under AED 1,000 per m² or under 10 m²" + (st.clean ? "" : " (switched off)"), n: L.base - (st.clean ? L.bad : 0), rm: st.clean ? L.bad : 0 }
+  ];
+  $("#dqSteps").innerHTML = steps.map(d => `<li><b>${d.k}</b>: ${fInt(d.n)} rows left${d.rm ? " (" + fInt(d.rm) + " removed)" : ""}</li>`).join("");
+  const pct = v => (v / L.base * 100).toFixed(1) + "%";
+  $("#dqTable").innerHTML = `<tr><th style="width:22%">Problem</th><th style="width:28%">How big</th><th>What we did</th></tr>
+  <tr><td><b>Dates</b> that are too old or not complete</td><td>${fInt(L.old)} rows before 2015 (the first is ${L.minDate}). ${fInt(L.future)} rows in September 2026.</td><td>We use January 2015 to August 2026 only. We read dates as text, so a time zone cannot move a sale to another month.</td></tr>
+  <tr><td><b>Days with no records</b></td><td>No Saturdays or Sundays. Almost no Fridays before 2022. 327 other weekdays are empty, mostly 2015–2019.</td><td>We never show single days. We group by month, quarter or year. The last quarter and year are not complete; we label them and do not estimate the rest.</td></tr>
+  <tr><td><b>Prices</b> that are far too low</td><td>${fInt(L.cheap)} sales under AED 1,000 per m² (lowest: AED 7.53). ${fInt(L.tiny)} sales under 10 m².</td><td>These are errors or not homes. We remove them (${fInt(L.bad)} rows, ${pct(L.bad)}). A switch puts them back, so you can see the effect.</td></tr>
+  <tr><td><b>Prices</b> that are very high</td><td>17 sales above AED 100,000 per m².</td><td>These are real (Palm Jumeirah, Jumeirah). We keep them. We use medians and quartiles, not averages, and log price axes.</td></tr>
+  <tr><td><b>Rows that are not home sales</b></td><td>${fInt(L.notSale)} mortgages and gifts. ${fInt(L.notHome)} land and whole-building sales.</td><td>Left out of every chart. A mortgage or gift is not a market price. Land and buildings cannot be compared per m² with flats and villas.</td></tr>
+  <tr><td><b>Few sales</b> in some communities (the file is a 10% sample)</td><td>112 communities have sales. Only about 76 have 10 or more.</td><td>We rate a community only if it has enough sales (slider, default 10). Others are hatched or hollow, not coloured. We never multiply counts by 10.</td></tr>
+  <tr><td><b>Empty cells</b></td><td>Nearest metro: empty in ${pct(L.noMetro)} of sales. Rooms: ${pct(L.noRooms)}. Master project: ${pct(L.noMaster)}. No coordinates: ${L.noCoord}.</td><td>Metro: we measure the distance ourselves from the 56 station coordinates. Rooms: the sale still counts for its community, but not in bedroom figures. Master project: left out of Launch waves only. We never invent a value.</td></tr>
+  <tr><td><b>Extra data from other years</b></td><td>Population is from 2018/2019. Metro stations are from about 2020. 3 communities have zero population.</td><td>We label it “2019 population”. We do not compute sales per 1,000 residents under 500 residents.</td></tr>`;
+}
+
+/* ---------- 6. WIRING ---------- */
+/* communities of one distance band (for the pinned highlight) */
+const bandSet = b => new Set(DATA.comms.filter(c => bandOf(c.km) === b).map(c => c.id));
+/* bring the main view on screen, so the effect of a click made further down the page can be seen */
+function showStage() { const r = $("#cityWrap").getBoundingClientRect(); if (r.top < 0 || r.bottom > innerHeight) $("#stage").scrollIntoView({ behavior: "smooth", block: "start" }); }
+function setHi(set) {
+  if (!set && STATE.pinBand != null) set = bandSet(STATE.pinBand);            // fall back to the pinned band
+  STATE.hi = set; d3.selectAll("#citySvg .poly, #citySvg .bubble").classed("dim", d => set && !set.has(d.id)); }
+function select(id) {                             // one selection for every sub-view
+  STATE.sel = id; const c = DATA.commById.get(id);
+  if (c.project) STATE.dev = c.project;
+  update(false);
+}
+function update(animate) {                       // the one path every interaction goes through
+  compute();
+  STATE.hi = STATE.pinBand != null ? bandSet(STATE.pinBand) : null;             // a pinned distance band stays highlighted
+  const L = STATE.persona;                       // only the active lens's sub-views are drawn (the others are hidden and have no width)
+  renderCity(animate); renderRank(); renderProfile();
+  if (L === "developer") { renderWaves(); $("#devName").textContent = STATE.dev ? title(STATE.dev) : "none"; }
+  if (L === "planner") { renderBands(); }
+  renderLedger(); syncControls();
+}
+function seg(id, opts, get, set) {               // segmented control helper
+  const root = d3.select(id); root.selectAll("button").data(opts).join("button").attr("type", "button").text(d => d[1]).on("click", (ev, d) => set(d[0]));
+  return () => root.selectAll("button").attr("aria-pressed", d => String(get() === d[0]));
+}
+const SYNC = [];
+const budgetScale = d3.scaleLog([300000, 20000000], [0, 100]);
+function syncControls() {
+  SYNC.forEach(f => f());
+  $("#selMetric").value = STATE.metric;
+  $("#minN").value = STATE.minN; $("#minNLabel").textContent = STATE.minN; $("#clean").checked = STATE.clean;
+  const P = PERSONAS[STATE.persona];
+  d3.selectAll("#dockBtns button").attr("aria-pressed", d => String(d === STATE.persona));
+  const act = $('#dockBtns button[aria-pressed="true"]'); if (act) { $("#dockInd").style.left = act.offsetLeft + "px"; $("#dockInd").style.width = act.offsetWidth + "px"; }
+  $("#stageTag").textContent = "Visualization " + PAGE_INFO.n + " · " + P.name + " lens"; $("#stageTitle").textContent = P.title;
+  $("#minNName").textContent = STATE.persona === "investor" ? "Liquidity floor" : "Reliability";
+  $("#brief").innerHTML = `<b>${P.name} lens.</b><ol>${P.brief.map(b => `<li>${b}</li>`).join("")}</ol>`;
+}
+const METRIC_NAMES = { afford: "Colour: within my budget", price: "Colour: median price per m²", growth: "Colour: price growth per year", offshare: "Colour: off-plan share", per1000: "Colour: sales per 1,000 residents", dist: "Colour: distance to metro" };
+function applyLens(key, first) {                 // switch persona: same hero view, new meaning, new sub-views
+  const run = () => {
+    if (PLAY) stopPlay();
+    const P = PERSONAS[key]; STATE.persona = key;
+    Object.assign(STATE, P.preset, { range: P.preset.range.slice(), pinBand: null, hi: null });
+    document.body.dataset.persona = key;                                  // CSS shows this lens's controls and sections
+    d3.select("#selMetric").selectAll("option").data(P.metrics, d => d).join("option").attr("value", d => d).text(d => METRIC_NAMES[d]);
+    const mn = $("#minN"), inv = key === "investor"; mn.min = inv ? 10 : 3; mn.max = inv ? 300 : 60; mn.step = inv ? 5 : 1;   // the investor's floor is about liquidity, so it reaches higher
+    if (STATE.minN > 60 && !inv) STATE.minN = 10;
+    d3.selectAll(".pv").style("animation", "none"); void document.body.offsetWidth; d3.selectAll(".pv").style("animation", null);   // replay the entrance of the sub-views
+    compute(); renderBrush(); update(true);
+  };
+  /* bring the hero into view first, so the transition is actually seen */
+  const r = $("#stage").getBoundingClientRect();
+  if (!first && (r.top < -60 || r.top > innerHeight * .45)) { $("#stage").scrollIntoView({ behavior: "smooth", block: "start" }); setTimeout(run, 520); } else run();
+}
+function setLayout(l) {
+  STATE.layout = l; update(true);
+}
+function init() {
+  $("#pageH1").textContent = PAGE_INFO.h1; $("#pageLede").textContent = PAGE_INFO.lede;
+  d3.select("#dockBtns").selectAll("button").data(PAGE_INFO.lenses).join("button").attr("type", "button").text(d => PERSONAS[d].dock).on("click", (ev, d) => { if (d !== STATE.persona) applyLens(d); });
+  SYNC.push(seg("#segLayout", PAGE_INFO.layouts, () => STATE.layout, setLayout));
+  SYNC.push(seg("#segType", [["all", "Units + villas"], ["unit", "Units"], ["villa", "Villas"]], () => STATE.type, v => { STATE.type = v; compute(); renderBrush(); update(true); }));
+  SYNC.push(seg("#segReg", [["all", "All"], ["off", "Off-plan"], ["ready", "Existing"]], () => STATE.reg, v => { STATE.reg = v; compute(); renderBrush(); update(true); }));
+  $("#selMetric").onchange = e => { STATE.metric = e.target.value; update(true); };
+  $("#minN").oninput = e => { $("#minNLabel").textContent = e.target.value; }; $("#minN").onchange = e => { STATE.minN = +e.target.value; update(false); };
+  $("#clean").onchange = e => { STATE.clean = e.target.checked; compute(); renderBrush(); update(false); };
+  d3.selectAll("[data-range]").on("click", ev => { const k = ev.currentTarget.dataset.range, N = CFG.nMonths - 1;
+    STATE.range = k === "all" ? [0, N] : k === "24" ? [N - 23, N] : k === "2021" ? [72, N] : [0, 71]; renderBrush(); update(true); });
+  SYNC.push(seg("#segWave", [["row", "Each ridge on its own scale"], ["common", "One common scale"]], () => STATE.waveScale, v => { STATE.waveScale = v; renderWaves(); syncControls(); }));
+  $("#playBtn").onclick = togglePlay;
+  setupCity(); sizeCity(); applyLens(PAGE_INFO.lenses[0], true);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(syncControls);
+  /* responsive: re-measure and redraw when the container width changes (rotation, window resize) */
+  let lastW = innerWidth, timer;
+  addEventListener("resize", () => { if (innerWidth === lastW) return; lastW = innerWidth; clearTimeout(timer);
+    timer = setTimeout(() => { sizeCity(); renderBrush(); update(false); }, 150); });
+  document.addEventListener("pointerdown", ev => { if (ev.pointerType !== "mouse" && !ev.target.closest("svg")) hideTip(); });
+}
+load().then(() => { init(); $("#loader").remove(); })
+  .catch(err => { console.error(err); $("#loader").innerHTML = "<b>The data could not be loaded.</b><span class='muted small'>" + err.message + "<br>Check the internet connection and reload: the page reads its data live from raw.githubusercontent.com.</span>"; });
+</script>
+</body>
+</html>

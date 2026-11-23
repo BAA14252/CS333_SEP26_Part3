@@ -1,0 +1,1079 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Price Skyline · Visualization 1 (home buyer + investor) · CS333 Part 3</title>
+<script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+<style>
+/* ---------- design tokens (roles, not raw colours, are used below) ---------- */
+:root{
+  color-scheme: light;
+  --page:#f4f3ef; --surface:#fcfcfb; --line:#e3e2dc; --line-2:#cfcec7;
+  --ink:#0b0b0b; --ink-2:#52514e; --ink-3:#8a8983;
+  --ready:#2a78d6;      /* existing / ready properties  (categorical slot 1) */
+  --offplan:#eb6834;    /* off-plan properties          (categorical slot 2) */
+  --accent:#0d366b; --focus:#eda100;
+  --red-line:#e34948; --green-line:#008300;
+  --nodata:#eceae4; --radius:14px;
+  font-family: system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--page);color:var(--ink);font-size:15px;line-height:1.5;-webkit-text-size-adjust:100%}
+.wrap{max-width:1280px;margin:0 auto;padding:0 16px 56px}
+header.hero{padding:28px 0 8px}
+.kicker{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2)}
+h1{font-size:clamp(26px,4.6vw,44px);line-height:1.08;margin:6px 0 8px;letter-spacing:-.02em}
+h2{font-size:clamp(19px,2.6vw,25px);margin:0 0 2px;letter-spacing:-.01em}
+h3{font-size:14px;margin:0 0 6px}
+p{margin:6px 0}
+.lede{max-width:820px;color:var(--ink-2);font-size:16px}
+.muted{color:var(--ink-2)} .small{font-size:12.5px}
+a{color:var(--accent)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-top:16px}
+.sec-head{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:baseline;justify-content:space-between}
+.tag{font-size:11.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-2)}
+
+/* ---------- persona visibility: an element with data-for is shown only for the personas it names ---------- */
+body[data-persona="buyer"] [data-for]:not([data-for~="buyer"]),
+body[data-persona="investor"] [data-for]:not([data-for~="investor"]),
+body[data-persona="developer"] [data-for]:not([data-for~="developer"]),
+body[data-persona="planner"] [data-for]:not([data-for~="planner"]){display:none!important}
+.pv{animation:rise .7s ease both}
+@keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+.prow{min-height:46px;display:flex;align-items:center;margin-top:10px;padding:5px 10px;border:1px dashed var(--line-2);border-radius:10px}
+.prow .ctl-row{row-gap:6px}
+.stage-ctl{margin-top:10px}
+h2{line-height:1.2}
+#v1Sub{min-height:2.9em}
+.chip{appearance:none;font:inherit;font-size:12.5px;border:1px solid var(--line-2);background:var(--surface);color:var(--ink);border-radius:999px;padding:3px 9px;margin-right:6px;cursor:pointer;min-height:30px}
+.chip i{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--c);margin-right:6px}
+.two+.two,.scrollx+.two{margin-top:16px}
+/* ---------- floating persona dock ---------- */
+body{padding-bottom:84px}
+#dock{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:40;display:flex;align-items:center;gap:10px;
+  background:rgba(11,11,11,.92);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-radius:999px;padding:6px 6px 6px 16px;box-shadow:0 8px 30px rgba(0,0,0,.28);max-width:calc(100vw - 16px)}
+.dock-lbl{color:#c3c2b7;font-size:12px;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap}
+.dock-btns{position:relative;display:flex}
+.dock-btns button{appearance:none;position:relative;z-index:1;font:inherit;font-size:14px;font-weight:600;border:0;background:transparent;color:#f0efec;padding:9px 16px;border-radius:999px;cursor:pointer;white-space:nowrap;transition:color .35s;min-height:40px}
+.dock-btns button[aria-pressed="true"]{color:#0b0b0b}
+.dock-next{color:#c3c2b7;font-size:13px;text-decoration:none;white-space:nowrap;padding:9px 12px 9px 6px;border-left:1px solid rgba(255,255,255,.18);margin-left:2px}
+.dock-next:hover{color:#fff}
+.prow{flex-wrap:wrap;gap:8px 14px}
+.dock-btns a{display:inline-flex;align-items:center;font-size:14px;font-weight:600;color:#f0efec;text-decoration:none;padding:9px 16px;border-radius:999px;white-space:nowrap;min-height:40px;transition:background .25s}
+.dock-btns a:hover{background:rgba(255,255,255,.14)}
+.dock-btns a[aria-current="page"]{background:#fcfcfb;color:#0b0b0b}
+.btn.play{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+.tw path{vector-effect:non-scaling-stroke}
+.dock-btns .ind{position:absolute;top:0;bottom:0;left:0;width:0;background:#fcfcfb;border-radius:999px;transition:left .45s cubic-bezier(.6,.05,.2,1),width .45s cubic-bezier(.6,.05,.2,1)}
+#brief{margin-top:10px;padding:12px 14px;border-left:3px solid var(--accent);background:var(--surface);border-radius:0 10px 10px 0}
+#brief ol{margin:4px 0 0;padding-left:20px} #brief li{margin:2px 0}
+ul.notes{margin:4px 0 12px;padding-left:20px} ul.notes li{margin:4px 0}
+
+/* ---------- controls ---------- */
+.controls{display:grid;grid-template-columns:1.25fr 1fr;gap:16px}
+.ctl-row{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin-top:8px}
+.ctl-label{font-size:12px;color:var(--ink-2);min-width:64px}
+.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:999px;overflow:hidden;background:var(--surface)}
+.seg button{appearance:none;font:inherit;font-size:13px;border:0;background:transparent;color:var(--ink);padding:6px 12px;cursor:pointer;min-height:34px}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button[aria-pressed="true"]{background:var(--accent);color:#fff}
+.btn{appearance:none;font:inherit;font-size:13px;border:1px solid var(--line-2);background:var(--surface);color:var(--ink);border-radius:999px;padding:6px 12px;cursor:pointer;min-height:34px}
+.btn:hover{border-color:var(--ink-3)}
+select,input[type=range]{font:inherit}
+select{border:1px solid var(--line-2);border-radius:8px;padding:6px 8px;background:var(--surface);color:var(--ink);min-height:34px;max-width:100%}
+#selMetric{width:270px}
+input[type=range]{accent-color:var(--accent);width:170px;max-width:100%}
+label.chk{display:inline-flex;gap:6px;align-items:center;font-size:13px;cursor:pointer}
+#rangeLabel{font-weight:600}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+
+/* ---------- layout of the main view ---------- */
+.city{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(300px,1fr);gap:16px;margin-top:10px}
+.side{display:flex;flex-direction:column;gap:14px;min-width:0}
+.panel{border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--surface);min-width:0}
+.two>*,.city>*,.controls>*{min-width:0}
+.two{display:grid;grid-template-columns:1.35fr 1fr;gap:16px;margin-top:10px}
+svg{display:block;width:100%;height:auto;overflow:visible;touch-action:pan-y}
+#cityWrap{position:relative;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff}
+#citySvg{touch-action:none;overflow:hidden}
+.zoomBtns{position:absolute;right:8px;top:8px;display:flex;flex-direction:column;gap:6px}
+.zoomBtns .btn{padding:4px 10px;background:rgba(252,252,251,.94)}
+.hint{position:absolute;left:10px;bottom:8px;font-size:11.5px;color:var(--ink-2);background:rgba(252,252,251,.88);padding:2px 6px;border-radius:6px;pointer-events:none}
+.legend{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;font-size:12px;color:var(--ink-2);margin:8px 0 0}
+.legend .sw{display:inline-block;width:16px;height:11px;border-radius:3px;margin-right:4px;vertical-align:-1px;border:1px solid rgba(0,0,0,.06)}
+.legend b{color:var(--ink);font-weight:600}
+.scrollx{overflow-x:auto;-webkit-overflow-scrolling:touch}
+
+/* ---------- marks ---------- */
+.poly{stroke:#fff;stroke-width:.6;vector-effect:non-scaling-stroke;cursor:pointer;transition:opacity .25s}
+.bubble{stroke:#fff;stroke-width:1.2;vector-effect:non-scaling-stroke;cursor:pointer}
+.dim{opacity:.16!important}
+.is-sel{stroke:var(--ink)!important;stroke-width:2.4!important}
+.axis text{fill:var(--ink-2);font-size:11px} .axis path,.axis line{stroke:var(--line-2)}
+.grid line{stroke:var(--line)} .grid path{display:none}
+.lbl{font-size:11px;fill:var(--ink);paint-order:stroke;stroke:#fff;stroke-width:3px;stroke-linejoin:round;pointer-events:none}
+.note{font-size:11px;fill:var(--ink-2)}
+.rank-row{display:grid;grid-template-columns:minmax(0,1fr) 92px;gap:8px;align-items:center;padding:3px 4px;border-radius:6px;cursor:pointer;font-size:13px}
+.rank-row:hover,.rank-row.on{background:#efeee9}
+.rank-row .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rank-bar{height:8px;border-radius:0 4px 4px 0;background:var(--ready)}
+.rank-val{font-variant-numeric:tabular-nums;font-size:12px;color:var(--ink-2);text-align:right}
+.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:8px 0}
+.tile{border:1px solid var(--line);border-radius:10px;padding:8px}
+.tile .v{font-size:17px;font-weight:650;font-variant-numeric:tabular-nums;line-height:1.2}
+.tile .k{font-size:11px;color:var(--ink-2);line-height:1.25}
+#tip{position:fixed;z-index:50;pointer-events:none;background:#fff;border:1px solid var(--line-2);border-radius:10px;
+  box-shadow:0 6px 24px rgba(0,0,0,.14);padding:9px 11px;font-size:12.5px;max-width:270px;opacity:0;transition:opacity .12s}
+#tip b{font-size:13.5px} #tip table{border-collapse:collapse;margin-top:4px} #tip td{padding:1px 0} #tip td+td{padding-left:12px;text-align:right;font-variant-numeric:tabular-nums}
+#loader{position:fixed;inset:0;background:var(--page);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:100;padding:24px;text-align:center}
+#bar{width:min(360px,80vw);height:8px;border-radius:8px;background:var(--line);overflow:hidden}
+#bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+details{margin-top:8px} summary{cursor:pointer;font-weight:600}
+table.plain{border-collapse:collapse;width:100%;font-size:13px}
+table.plain th,table.plain td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
+table.plain th{font-size:12px;color:var(--ink-2);font-weight:600}
+.pill{display:inline-block;font-size:11px;border:1px solid var(--line-2);border-radius:999px;padding:0 7px;color:var(--ink-2);margin-left:6px}
+
+/* ---------- responsive: tablets and phones ---------- */
+@media (max-width: 980px){
+  .city,.two,.controls{grid-template-columns:1fr!important}
+}
+@media (max-width: 560px){
+  .wrap{padding:0 10px 40px} .card{padding:12px} .zoomBtns .btn{min-height:30px;padding:2px 9px;font-size:12px} .hint{display:none}
+  .dock-lbl{display:none} #dock{padding:5px;bottom:8px} .dock-btns button{padding:9px 12px;font-size:13px} .dock-next{font-size:12px;padding:9px 8px 9px 6px} .prow{padding:4px 6px}
+  table.plain,table.plain tbody,table.plain tr,table.plain td{display:block;width:auto!important} table.plain th{display:none}
+  table.plain tr{border-bottom:1px solid var(--line);padding:8px 0} table.plain td{border:0;padding:2px 0} table.plain td:first-child{font-weight:650} .tiles{grid-template-columns:repeat(3,1fr)}
+  .ctl-label{min-width:100%}
+}
+@media (prefers-reduced-motion: reduce){ *{transition:none!important;scroll-behavior:auto!important} }
+</style>
+</head>
+<body data-persona="buyer">
+<div id="loader"><b>Loading Dubai Land Department transactions…</b><div id="bar"><i></i></div><span class="muted small" id="loadMsg">fetching 18 MB of CSV from the course repository</span></div>
+<div id="tip" role="status"></div>
+
+<!-- floating persona switch: stays on screen so the transition between personas can be watched -->
+<nav id="dock" aria-label="Lens switch"><span class="dock-lbl">View as</span><div class="dock-btns" id="dockBtns"><i class="ind" id="dockInd"></i></div></nav>
+
+<div class="wrap">
+<header class="hero">
+  <div class="kicker">CS333 Introduction to Data Visualisation · Team Project Part 3 · D3.js · Basil Albakri &amp; Saad Alshahrani</div>
+  <h1 id="pageH1"></h1>
+  <p class="lede" id="pageLede"></p>
+  <div id="brief"></div>
+</header>
+
+<!-- ===================== shared controls ===================== -->
+<section class="card" id="controls">
+  <div class="controls">
+    <div>
+      <div class="sec-head"><h3>Period <span class="muted" style="font-weight:400">· drag on the chart to select months</span></h3><span id="rangeLabel"></span></div>
+      <svg id="brushSvg" role="img" aria-label="Monthly sales with a draggable period selector"></svg>
+      <div class="ctl-row">
+        <span class="ctl-label">Jump to</span>
+        <button class="btn" data-range="all">All (2015–Aug 2026)</button>
+        <button class="btn" data-range="24">Last 24 months</button>
+        <button class="btn" data-range="2021">Since Jan 2021</button>
+        <button class="btn" data-range="pre">2015–2020</button>
+      </div>
+    </div>
+    <div>
+      <h3>Filters <span class="muted" style="font-weight:400">· apply to every chart on this page</span></h3>
+      <div class="ctl-row"><span class="ctl-label">Property</span><div class="seg" id="segType"></div></div>
+      <div class="ctl-row"><span class="ctl-label">Status</span><div class="seg" id="segReg"></div></div>
+      <div class="ctl-row"><span class="ctl-label" id="minNName">Reliability</span>
+        <label class="chk">min. sales per community <input type="range" id="minN" min="3" max="60" step="1" style="width:110px"> <b id="minNLabel"></b></label>
+        <label class="chk"><input type="checkbox" id="clean" checked> remove implausible records</label>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== the stage: one city, re-arranged per persona ===================== -->
+<section class="card" id="stage">
+  <div class="tag" id="stageTag"></div><h2 id="stageTitle"></h2>
+  <div class="ctl-row stage-ctl">
+    <span class="ctl-label" style="min-width:0">Show the city as</span>
+    <div class="seg" id="segLayout" role="group" aria-label="Layout"></div>
+    <select id="selMetric" aria-label="Colour by"></select>
+    <label class="chk" id="metroChk"><input type="checkbox" id="metro" checked> metro lines</label>
+  </div>
+  <div class="prow">
+    <div class="ctl-row" data-for="buyer" style="margin:0"><span class="ctl-label" style="min-width:0">I am looking for a</span>
+      <select id="selRooms" aria-label="Bedrooms"></select><span class="ctl-label" style="min-width:0">up to</span>
+      <input type="range" id="budget" min="0" max="100" step="1" aria-label="Budget in AED"><b id="budgetLabel"></b></div>
+    <div class="ctl-row" data-for="investor" style="margin:0"><span class="ctl-label" style="min-width:0">Shortlist (click up to 3 towers or comets):</span><span id="chips"></span></div>
+  </div>
+  <p class="muted small" id="v1Sub"></p>
+  <div class="city">
+    <div>
+      <div id="cityWrap">
+        <svg id="citySvg" role="img" aria-label="Dubai communities as a map, a cartogram or a scatter plot"></svg>
+        <div class="zoomBtns"><button class="btn" id="zin" aria-label="Zoom in">+</button><button class="btn" id="zout" aria-label="Zoom out">−</button><button class="btn" id="zcity">City</button><button class="btn" id="zall">Emirate</button></div>
+        <div class="hint" id="cityHint"></div>
+      </div>
+      <div class="legend" id="cityLegend"></div>
+    </div>
+    <div class="side">
+      <div class="panel"><h3 id="rankTitle"></h3><div id="rank"></div></div>
+      <div class="panel" id="profile"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== Buyer ===================== -->
+<!-- ===================== Investor ===================== -->
+<section class="card pv" data-for="investor" id="s-investor">
+  <div class="tag">Investor lens · two more sub-views</div><h2>Where it came from, and the shortlist compared</h2>
+  <p class="muted small">Comets show the path of every community over the period. Below them, the communities you clicked, on one indexed scale (100 = their price at the start of the period), and how many sales each has per quarter (how easy it is to get in and out).</p>
+  <div class="panel" style="margin-top:10px"><h3 id="cometTitle"></h3><svg id="cometSvg" role="img" aria-label="Comet chart: price and sales per year at the start and the end of the period"></svg>
+    <div class="legend"><span>tail = start of the period, head = end</span><span>→ right = got pricier</span><span>↑ up = more sales a year</span><span>colour = price growth against the city (blue slower, red faster)</span><span>ring = on your shortlist</span></div></div>
+  <div class="two">
+    <div class="panel"><h3>Price index <span class="muted" style="font-weight:400">· quarterly median price per m², start of period = 100</span></h3><svg id="cmpSvg" role="img" aria-label="Indexed price of the shortlisted communities"></svg></div>
+    <div class="panel"><h3>Liquidity <span class="muted" style="font-weight:400">· sales per quarter, same scale for all</span></h3><svg id="liqSvg" role="img" aria-label="Sales per quarter of the shortlisted communities"></svg></div>
+  </div>
+</section>
+
+<!-- ===================== Developer ===================== -->
+
+<!-- ===================== Planner ===================== -->
+
+<!-- ===================== Design notes (deliverable) ===================== -->
+<section class="card" id="notes">
+  <div class="tag">Submission notes for this visualization</div><h2>Encoding, interaction and value added</h2>
+  <p><b>Encoding</b> (what each mark means). One main view and four linked sub-views, read through two lenses: buyer and investor.</p>
+  <ul class="notes">
+    <li><b>Main view, the price skyline.</b> A tilted map of Dubai. Each community has one tower at its location. Metro lines are drawn on the ground.</li>
+    <li><b>Buyer lens.</b> Tower height = median price of the chosen home (number of bedrooms). Green = the part within the budget. Orange = the part above it. A fully green tower is within budget.</li>
+    <li><b>Investor lens.</b> Tower height = median price per m² at the end of the period. Black line = the price at the start. Colour = growth per year compared with the city (red = faster, blue = slower, grey = about the same). Coloured outline = on the shortlist.</li>
+    <li><b>Other layouts.</b> Flat map (colour only) and cartogram (circle area = number of sales).</li>
+    <li><b>Sub-view 1, ranked list</b> (both lenses). Bar length = the measure of the lens, sorted.</li>
+    <li><b>Sub-view 2, community profile</b> (both lenses). Line = median price per m² per quarter, band = middle half of sales, grey line = the city. Buyer lens adds the price ladder: one bar per bedroom count, bar = middle half of prices, tick = median, dashed line = budget, text = median size.</li>
+    <li><b>Sub-view 3, comet chart</b> (investor). Tail = start of the period, head = end, x = median price per m², y = sales per year (both log), colour = growth compared with the city.</li>
+    <li><b>Sub-view 4, price index and liquidity</b> (investor). One line per shortlisted community, start = 100; bars = sales per quarter on one common scale.</li>
+  </ul>
+  <p><b>Interaction.</b></p>
+  <ul class="notes">
+    <li><b>Switch lens</b> (floating bar): the towers sink and grow again with the new meaning, and the sub-views change.</li>
+    <li><b>Budget slider:</b> the towers change colour while you drag.</li>
+    <li><b>Period brush:</b> sets the months used. Growth, comets and the index are calculated again and animate.</li>
+    <li><b>Click</b> a tower, comet, bar or row: it is selected in every sub-view. In the investor lens it is also added to the shortlist (up to three).</li>
+    <li><b>Hover</b> a row of the ranked list: that community is highlighted on the skyline.</li>
+    <li><b>Filters:</b> property type, status (existing or off-plan), minimum sales, remove errors. Layout switch, pan and zoom.</li>
+  </ul>
+  <p><b>Value added.</b> One skyline answers two different questions about price.</p>
+  <ul class="notes">
+    <li><b>Buyer:</b> Where can I afford the home I want? How much over budget is it elsewhere? What does each home size cost in one community, and how big is it?</li>
+    <li><b>Investor:</b> Where is the price still low but rising faster than the city? Did the number of sales grow too (comets)? Does my shortlist still look good when indexed to 100 and checked for enough sales?</li>
+  </ul>
+  <p><b>Data.</b> Main file: <code>transactions.csv</code> from the Dubai Land Department. It is a random 10% sample, and we do not scale the counts up. We added two files from the course repository:</p>
+  <ul class="notes">
+    <li><code>dubai.geojson</code>: community borders, area and population. Linked by community number (<code>comm_num = COMM_NUM</code>).</li>
+    <li><code>dubai_metro_stations.geojson</code>: the 56 stations. Linked by location: we measure the straight-line distance from each area centre (<code>area_lat, area_lon</code>) to every station and keep the nearest.</li>
+    
+  </ul>
+  <p class="small muted">All three files are loaded from the course repository each time the page opens.</p>
+</section>
+<!-- ===================== Data quality ===================== -->
+<section class="card" id="dq">
+  <div class="tag">Data quality · the same rules in both visualizations</div><h2>What is wrong with the data, and what we did</h2>
+  <p class="muted small">Counted live from the file. Test our choices in the Filters box: <b>remove implausible records</b> and <b>min. sales per community</b>. Both change every chart.</p>
+  <h3 style="margin-top:12px">Cleaning, step by step</h3>
+  <ol class="notes" id="dqSteps" style="list-style:none;padding-left:0"></ol>
+  <h3 style="margin-top:12px">Every data problem and what we did</h3>
+  <table class="plain" id="dqTable"></table>
+</section>
+
+<p class="small muted" style="margin-top:14px">Data: Dubai Land Department transactions (10% sample), Dubai Municipality communities, and metro stations, all from <a href="https://github.com/sharios/CS333/tree/main/2026-27">sharios/CS333</a>. Built with D3 v7.</p>
+</div>
+
+<script>
+"use strict";
+/* =====================================================================================
+   DUBAI, REARRANGED  ·  CS333 Part 3
+   Reading guide to this script
+     1. CONFIG and STATE        every decision and every user choice lives in two objects
+     2. LOAD                    fetch the three files straight from the course repository
+     3. PREPARE                 parse rows once, apply the data-quality rules, spatial join
+     4. COMPUTE                 filter + aggregate for the current STATE (pure functions)
+     5. RENDER                  one function per view; each uses the D3 data join
+     6. WIRING                  controls -> STATE -> compute() -> render()
+   ===================================================================================== */
+
+/* ---------- 1. CONFIG and STATE ---------- */
+const REPO = "https://raw.githubusercontent.com/sharios/CS333/main/2026-27/";
+const URLS = {
+  tx:     REPO + "Part%202/transactions.csv",
+  geo:    REPO + "Part%202/dubai.geojson",
+  metro:  REPO + "Part%203/dubai_metro_stations.geojson"
+};
+const CFG = {
+  y0: 2015, nMonths: 140,          // analysis window: Jan 2015 (month 0) .. Aug 2026 (month 139)
+  minPrice: 1000,                  // AED per m2: anything cheaper is a registration error
+  minSize: 10,                     // m2: smaller "homes" are parking bays / partial shares
+  bands: [1, 2, 4, 8],             // km from nearest metro station
+  bandNames: ["under 1 km", "1–2 km", "2–4 km", "4–8 km", "over 8 km"],
+  rooms: ["Studio", "1 B/R", "2 B/R", "3 B/R", "4+ B/R"]
+};
+const COL = {
+  blues: ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b"],
+  bandCols: ["#0d366b", "#256abf", "#5598e7", "#9ec5f4", "#cde2fb"],             // near = dark
+  diverging: ["#256abf", "#6da7ec", "#b7d3f6", "#e9e8e4", "#f4b9b0", "#e5736b", "#b92f2f"],
+  ready: "#2a78d6", offplan: "#eb6834", ink: "#0b0b0b", ink2: "#52514e", nodata: "#eceae4"
+};
+const PAGE = "price";             // which of the two visualizations this file is
+const STATE = {
+  persona: null, layout: "map", metric: "price",
+  range: [116, 139],               // selected months (inclusive)
+  type: "all", reg: "all", rooms: "1 B/R", budget: 1500000,
+  minN: 10, clean: true, metro: true,
+  sel: null,                       // selected community number
+  pinStation: null, hi: null, waveScale: "row",
+  compare: [null, null, null], cmpNext: 0,   // investor shortlist (3 colour slots)
+  dev: null                                  // developer: selected master development
+};
+/* this file is one of two visualizations; each has two lenses (personas) that share the hero view */
+const PAGE_INFO = {
+  n: 1, h1: "Price Skyline", lenses: ["buyer", "investor"],
+  lede: "Dubai as a skyline of prices, read through two lenses. The buyer sees how tall the price of a home is against a budget. The investor sees how far each tower has risen. Switch lens in the bar at the bottom of the screen.",
+  layouts: [["towers", "Skyline"], ["map", "Flat map"], ["cartogram", "Cartogram"]]
+};
+const PERSONAS = {
+  buyer: { name: "Home buyer", dock: "Buyer", title: "Where does my budget buy the home I want?",
+    metrics: ["afford", "price"], preset: { layout: "towers", metric: "afford", range: [116, 139] },
+    brief: ["Set bedrooms and budget. Fully green towers are communities where that home typically sells within your budget; orange is the part above it.",
+            "Click a tower: the <b>price ladder</b> shows what each bedroom count costs there, and its size.",
+            "The <b>ranked list</b> names the communities within budget, most traded first. The line under the ladder shows how the price got here."] },
+  investor: { name: "Investor", dock: "Investor", title: "Where is it still cheap, and rising?",
+    metrics: ["growth", "price"], preset: { layout: "towers", metric: "growth", range: [72, 139] },
+    brief: ["Tower height is today's price per m². The <b>black line</b> on each tower is where it stood at the start of the period; red towers rose faster than the city, blue slower.",
+            "Short red towers are the shortlist: still cheap, rising fast. Click up to three; they get a coloured outline.",
+            "Below: <a href='#s-investor'>comets</a> show whether liquidity rose with price, then the shortlist is indexed and checked for sales volume."] },
+};
+
+/* ---------- small helpers ---------- */
+const $ = s => document.querySelector(s);
+const fInt = d3.format(",d"), fPct = d3.format(".0%");
+const fAED = v => v == null || isNaN(v) ? "n/a" : v >= 1e6 ? String(+(v / 1e6).toFixed(v >= 1e7 ? 0 : 2)) + "M" : v >= 1e3 ? Math.round(v / 1e3) + "k" : Math.round(v) + "";
+const fPm = v => v == null || isNaN(v) ? "n/a" : fInt(Math.round(v / 10) * 10);
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const monthName = m => MONTHS[m % 12] + " " + (CFG.y0 + Math.floor(m / 12));
+const quarterName = q => "Q" + (q % 4 + 1) + " " + (CFG.y0 + Math.floor(q / 4));
+const title = s => s.toLowerCase().replace(/(^|[\s\-\/'(])([a-z])/g, (m, a, b) => a + b.toUpperCase()).replace(/\bDmcc\b/g, "DMCC").replace(/\bJbr\b/g, "JBR").replace(/\bDamac\b/g, "DAMAC").replace(/\s+/g, " ");
+const quant = (sorted, p) => d3.quantileSorted(sorted, p);
+const DUR = () => matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 900;
+function haversine(la1, lo1, la2, lo2) {            // great-circle distance in km
+  const p = Math.PI / 180, a = Math.sin((la2 - la1) * p / 2) ** 2 + Math.cos(la1 * p) * Math.cos(la2 * p) * Math.sin((lo2 - lo1) * p / 2) ** 2;
+  return 12742 * Math.asin(Math.sqrt(a));
+}
+const bandOf = km => km == null ? null : CFG.bands.findIndex(b => km < b) === -1 ? 4 : CFG.bands.findIndex(b => km < b);
+
+/* ---------- tooltip (works with mouse and touch) ---------- */
+const tip = d3.select("#tip");
+function showTip(ev, html) {
+  tip.html(html).style("opacity", 1);
+  const r = tip.node().getBoundingClientRect(), pad = 12;
+  let x = ev.clientX + 14, y = ev.clientY + 14;
+  if (x + r.width + pad > innerWidth) x = ev.clientX - r.width - 14;
+  if (y + r.height + pad > innerHeight) y = ev.clientY - r.height - 14;
+  tip.style("left", Math.max(pad, x) + "px").style("top", Math.max(pad, y) + "px");
+}
+const hideTip = () => tip.style("opacity", 0);
+addEventListener("scroll", hideTip, { passive: true });
+
+/* ---------- 2. LOAD ---------- */
+const DATA = {};       // everything derived once from the files
+async function fetchTextWithProgress(url, approxBytes) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(url + " -> HTTP " + res.status);
+  if (!res.body) return res.text();
+  const reader = res.body.getReader(), dec = new TextDecoder(); let got = 0, out = [];
+  for (;;) {
+    const { done, value } = await reader.read(); if (done) break;
+    got += value.length; out.push(dec.decode(value, { stream: true }));
+    $("#bar i").style.width = Math.min(96, got / approxBytes * 100) + "%";
+  }
+  out.push(dec.decode()); return out.join("");
+}
+async function load() {
+  const [txt, geo, metro] = await Promise.all([
+    fetchTextWithProgress(URLS.tx, 18400000), d3.json(URLS.geo), d3.json(URLS.metro)]);
+  $("#loadMsg").textContent = "parsing and checking 89,212 rows";
+  await new Promise(r => setTimeout(r, 30));
+  prepare(txt, geo, metro);
+}
+
+/* ---------- 3. PREPARE: parse once, apply the data-quality rules ---------- */
+function prepare(txt, geo, metro) {
+  /* 3a. metro stations (order = station code = travel order) */
+  const stations = metro.features.map(f => ({
+    id: f.properties.STATION_NO, lat: +f.properties.LAT_STATION, lon: +f.properties.LON_STATION, route: f.properties.ROUTE,
+    name: /^Stations? R\d+/.test(f.properties.STATION_NAME) ? "Route 2020 · " + f.properties.STATION_NO : f.properties.STATION_NAME
+  })).sort((a, b) => d3.ascending(a.id, b.id));
+
+  /* 3b. transactions: keep only the fields we use, in compact form.
+         Dates are read as text (YYYY-MM-DD) and turned into a month index, so no Date object
+         and no time zone is ever involved. */
+  const L = { all: 0, old: 0, future: 0, baddate: 0, window: 0, notSale: 0, notHome: 0, base: 0, cheap: 0, tiny: 0, bad: 0, noRooms: 0, noMaster: 0, noMetro: 0, noCoord: 0, minDate: "9999", maxDate: "0" };
+  const S = [], areaPos = new Map(), priceAll = [], weekdayMissing = new Set();
+  const roomMap = { "Studio": 0, "1 B/R": 1, "2 B/R": 2, "3 B/R": 3, "4 B/R": 4, "5 B/R": 4, "6 B/R": 4, "7 B/R": 4 };
+  d3.csvParse(txt, r => {
+    L.all++;
+    const ds = r.instance_date, y = +ds.slice(0, 4), mo = +ds.slice(5, 7);
+    if (!(y > 1900 && mo >= 1 && mo <= 12)) { L.baddate++; return; }
+    if (ds < L.minDate) L.minDate = ds; if (ds > L.maxDate) L.maxDate = ds;
+    const m = (y - CFG.y0) * 12 + mo - 1;
+    if (m < 0) { L.old++; return; }                               // rule 1: before 2015 (sparse, some implausible)
+    if (m >= CFG.nMonths) { L.future++; return; }                 // rule 2: September 2026 is an incomplete month
+    L.window++;
+    if (r.trans_group_en !== "Sales") { L.notSale++; return; }    // rule 3: mortgages and gifts carry no market price
+    if (r.property_type_en !== "Unit" && r.property_type_en !== "Villa") { L.notHome++; return; }   // rule 4
+    L.base++;
+    const ppm = +r.meter_sale_price, size = +r.procedure_area, areaId = +r.area_id;
+    const cheap = !(ppm >= CFG.minPrice), tiny = !(size >= CFG.minSize);
+    if (cheap) L.cheap++; if (tiny) L.tiny++; if (cheap || tiny) L.bad++;
+    if (r.rooms_en === "") L.noRooms++; if (r.master_project_en === "") L.noMaster++; if (r.nearest_metro_en === "") L.noMetro++;
+    const lat = +r.area_lat, lon = +r.area_lon;
+    if (r.area_lat === "" || !isFinite(lat)) L.noCoord++; else if (!areaPos.has(areaId)) areaPos.set(areaId, { id: areaId, lat, lon, name: r.area_name_en, comm: +r.comm_num });
+    priceAll.push(ppm);
+    S.push({ m, q: Math.floor(m / 3), comm: +r.comm_num, areaId, villa: r.property_type_en === "Villa", off: r.reg_type_en === "Off-Plan Properties",
+             rooms: roomMap[r.rooms_en] ?? -1, mp: r.master_project_en || null, area: r.area_name_en, size, worth: +r.actual_worth, ppm, bad: cheap || tiny, km: null, stn: null });
+  });
+
+  /* 3c. spatial join: nearest metro station for every DLD area centre.
+         DLD's own nearest_metro_en is blank for about a third of the rows, so we measure it ourselves. */
+  for (const a of areaPos.values()) {
+    let best = Infinity, bs = null;
+    for (const s of stations) { const d = haversine(a.lat, a.lon, s.lat, s.lon); if (d < best) { best = d; bs = s.id; } }
+    a.km = best; a.stn = bs;
+  }
+  for (const r of S) { const a = areaPos.get(r.areaId); if (a) { r.km = a.km; r.stn = a.stn; } }
+
+  /* 3d. communities: geometry + population + names people actually use */
+  const byComm = d3.group(S, d => d.comm);
+  const comms = geo.features.map(f => {
+    const p = f.properties, id = +p.COMM_NUM, rows = byComm.get(id) || [];
+    const top = (acc) => rows.length ? d3.greatest(d3.rollup(rows.filter(d => acc(d)), v => v.length, acc), d => d[1])?.[0] : null;
+    const kms = rows.filter(d => d.km != null).map(d => d.km);
+    return { id, feature: f, dm: title(p.CNAME_E), name: top(d => d.area) || title(p.CNAME_E), project: top(d => d.mp),
+             pop: +p["Population 2019"] || 0, km2: +p["Area Sq Km"], lat: +p.Latitude, lon: +p.Longitude,
+             km: kms.length ? d3.mean(kms) : d3.min(stations, s => haversine(+p.Latitude, +p.Longitude, s.lat, s.lon)) };
+  });
+  Object.assign(DATA, { S, L, stations, areas: [...areaPos.values()], comms, commById: new Map(comms.map(c => [c.id, c])), priceAll });
+}
+
+/* ---------- 4. COMPUTE: everything that depends on STATE ---------- */
+const VIEW = {};       // results of the last compute(), read by the render functions
+function summarise(rows) {                      // robust summary of a group of sales
+  const p = rows.map(d => d.ppm).sort(d3.ascending);
+  return { n: rows.length, med: quant(p, .5), q1: quant(p, .25), q3: quant(p, .75), off: d3.mean(rows, d => d.off ? 1 : 0) };
+}
+function compute() {
+  const st = STATE, [a, b] = st.range;
+  /* F = sales passing the global filters (all months); Fr = F inside the selected period */
+  const FT = DATA.S.filter(d => (!st.clean || !d.bad) && (st.type === "all" || (st.type === "villa") === d.villa));   // before the Status filter
+  const F = FT.filter(d => st.reg === "all" || (st.reg === "off") === d.off);
+  const Fr = F.filter(d => d.m >= a && d.m <= b);
+  /* growth compares the first and last 24 months of the period (or halves if it is short) */
+  const len = b - a + 1, win = len >= 48 ? 24 : Math.floor(len / 2), gapYears = Math.max((len - win) / 12, 1 / 12);
+  const growth = rows => {
+    const e = rows.filter(d => d.m < a + win).map(d => d.ppm).sort(d3.ascending), l = rows.filter(d => d.m > b - win).map(d => d.ppm).sort(d3.ascending);
+    return e.length >= 8 && l.length >= 8 && win >= 6 ? Math.pow(quant(l, .5) / quant(e, .5), 1 / gapYears) - 1 : null;
+  };
+  const city = Object.assign(summarise(Fr), { growth: growth(Fr) });
+  const groups = d3.group(Fr, d => d.comm);
+  const stats = new Map();
+  for (const c of DATA.comms) {
+    const rows = groups.get(c.id) || [];
+    const s = rows.length ? summarise(rows) : { n: 0 };
+    s.ok = s.n >= st.minN;                                   // enough sales to trust a median
+    s.growth = s.ok ? growth(rows) : null;
+    s.per1000 = c.pop >= 500 ? s.n / c.pop * 1000 : null;    // undefined where (almost) nobody lived in 2019
+    const match = rows.filter(d => d.rooms === CFG.rooms.indexOf(st.rooms));
+    s.nMatch = match.length;
+    s.afford = match.length >= Math.max(5, Math.round(st.minN / 2)) ? d3.mean(match, d => d.worth <= st.budget ? 1 : 0) : null;
+    s.homeSize = s.afford != null ? d3.median(match, d => d.size) : null;
+    s.homeMed = s.afford != null ? d3.median(match, d => d.worth) : null;          // median price of the chosen home (buyer towers)
+    const eR = rows.filter(d => d.m < a + win), lR = rows.filter(d => d.m > b - win), yrs = Math.max(win, 1) / 12;   // both ends of the period (investor comets)
+    s.early = eR.length >= 8 ? { med: d3.median(eR, d => d.ppm), rate: eR.length / yrs } : null;
+    s.late = lR.length >= 8 ? { med: d3.median(lR, d => d.ppm), rate: lR.length / yrs } : null;
+    stats.set(c.id, s);
+  }
+  Object.assign(VIEW, { F, FT, Fr, city, stats, win });
+  VIEW.metric = buildMetric();
+  if (STATE.sel == null || !DATA.commById.has(STATE.sel)) STATE.sel = d3.greatest(DATA.comms, c => stats.get(c.id).n).id;
+  if (!STATE.dev) STATE.dev = DATA.commById.get(STATE.sel).project;
+}
+
+/* The colour measure: value accessor, colour scale and legend, built for the current data */
+function buildMetric() {
+  const st = STATE, stats = VIEW.stats, vals = k => DATA.comms.map(c => stats.get(c.id)).filter(s => s.ok && s[k] != null).map(s => s[k]);
+  const ramp = (from, to, n) => d3.quantize(d3.interpolateLab(from, to), n);
+  const rangeLabels = (th, fmt) => !th.length || th.some(v => v == null || isNaN(v)) ? [] : [("under " + fmt(th[0]))].concat(th.slice(1).map((t, i) => fmt(th[i]) + "–" + fmt(t)), ["over " + fmt(th[th.length - 1])]);
+  const M = {
+    price: () => { const sc = d3.scaleQuantile(vals("med"), COL.blues);
+      return { label: "Median price per m²", unit: "AED/m²", value: (s) => s.ok ? s.med : null, color: sc, fmt: v => fPm(v), legend: rangeLabels(sc.quantiles(), v => fAED(v)), cols: COL.blues, note: "7 quantile classes (equal number of communities in each)" }; },
+    growth: () => { const g0 = VIEW.city.growth || 0, sc = d3.scaleThreshold([-.06, -.03, -.01, .01, .03, .06], COL.diverging);
+      return { label: "Price growth per year", unit: "% per year", value: s => s.growth, color: v => sc(v - g0), fmt: v => d3.format("+.1%")(v), cols: COL.diverging,
+               legend: ["6+ pts slower", "3–6 slower", "1–3 slower", "≈ city (" + d3.format("+.1%")(g0) + ")", "1–3 faster", "3–6 faster", "6+ pts faster"], note: "median price per m², last vs first " + VIEW.win + (VIEW.win === 1 ? " month" : " months") + " of the period, annualised; colour = difference from the city-wide rate" }; },
+    offshare: () => { const cols = ramp("#fde6da", "#a23a10", 5), sc = d3.scaleQuantize([0, 1], cols);
+      return { label: "Off-plan share of sales", unit: "share", value: s => s.ok ? s.off : null, color: sc, fmt: fPct, cols, legend: ["0–20%", "20–40%", "40–60%", "60–80%", "80–100%"], note: "share of sales registered as off-plan" }; },
+    afford: () => { const cols = ramp("#d9f3e9", "#0b6b4a", 5), sc = d3.scaleQuantize([0, 1], cols);
+      return { label: "Within my budget", unit: "share", value: s => s.afford, color: sc, fmt: fPct, cols, legend: ["0–20%", "20–40%", "40–60%", "60–80%", "80–100%"], note: "share of " + st.rooms + " sales at or under AED " + fAED(st.budget) }; },
+    per1000: () => { const cols = ramp("#e7e3fb", "#33248f", 6), sc = d3.scaleQuantile(vals("per1000"), cols);
+      return { label: "Sales per 1,000 residents", unit: "per 1,000", value: s => s.ok ? s.per1000 : null, color: sc, fmt: v => v >= 100 ? fInt(v) : v.toFixed(1), cols, legend: rangeLabels(sc.quantiles(), v => v >= 10 ? Math.round(v) : v.toFixed(1)), note: "sales in the period ÷ 2019 population; communities with under 500 residents in 2019 are not rated" }; },
+    dist: () => { const sc = d3.scaleThreshold(CFG.bands, COL.bandCols);
+      return { label: "Distance to nearest metro", unit: "km", value: (s, c) => s.n > 0 || c.pop > 0 ? c.km : null, color: sc, fmt: v => v.toFixed(1) + " km", cols: COL.bandCols, legend: CFG.bandNames, always: true, note: "straight-line distance from the area centre to the nearest station (2020 network)" }; }
+  };
+  const m = M[st.metric](); m.key = st.metric; return m;
+}
+const metricVal = c => VIEW.metric.value(VIEW.stats.get(c.id), c);
+function fillOf(c) {
+  const s = VIEW.stats.get(c.id), v = metricVal(c);
+  if (v != null) return VIEW.metric.color(v);
+  return s.n > 0 ? "url(#hatch)" : COL.nodata;
+}
+
+/* ---------- 5. RENDER ---------- */
+/* 5a. Period brush: context chart of monthly sales */
+const BR = {};
+function renderBrush(init) {
+  const svg = d3.select("#brushSvg"), W = svg.node().parentNode.clientWidth, H = 92, m = { l: 34, r: 8, t: 6, b: 20 };
+  svg.attr("viewBox", `0 0 ${W} ${H}`);
+  const counts = new Array(CFG.nMonths).fill(0); for (const d of VIEW.F) counts[d.m]++;
+  const x = d3.scaleLinear([0, CFG.nMonths], [m.l, W - m.r]), y = d3.scaleLinear([0, d3.max(counts) || 1], [H - m.b, m.t]).nice(3);
+  svg.selectAll("*").remove();
+  svg.append("g").attr("class", "axis").attr("transform", `translate(0,${H - m.b})`).call(d3.axisBottom(x).tickValues(d3.range(0, CFG.nMonths, W < 520 ? 24 : 12)).tickFormat(v => CFG.y0 + v / 12).tickSizeOuter(0));
+  svg.append("g").attr("class", "axis").attr("transform", `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(3).tickSizeOuter(0)).call(g => g.select(".domain").remove());
+  svg.append("path").attr("fill", "#c9c8c2").attr("d", d3.area().x((d, i) => x(i + .5)).y0(y(0)).y1(d => y(d)).curve(d3.curveStep)(counts));
+  const brush = d3.brushX().extent([[m.l, m.t], [W - m.r, H - m.b]])
+    .on("brush", ev => { if (ev.selection) $("#rangeLabel").textContent = labelRange(snap(ev.selection)); })
+    .on("end", ev => {
+      if (!ev.sourceEvent) return;                         // ignore our own programmatic moves
+      const r = ev.selection ? snap(ev.selection) : [0, CFG.nMonths - 1];
+      STATE.range = r; update(false);
+      if (!ev.selection) renderBrush();                    // a plain click clears the brush: show the full period again
+    });
+  const snap = sel => { let a = Math.round(x.invert(sel[0])), b = Math.round(x.invert(sel[1])) - 1; a = Math.max(0, Math.min(a, CFG.nMonths - 1)); b = Math.max(a, Math.min(b, CFG.nMonths - 1)); return [a, b]; };
+  const g = svg.append("g").call(brush); g.select(".overlay").style("touch-action", "none"); g.select(".selection").attr("fill", "#0d366b").attr("fill-opacity", .18).attr("stroke", "#0d366b");
+  g.call(brush.move, [x(STATE.range[0]), x(STATE.range[1] + 1)]);
+  $("#rangeLabel").textContent = labelRange(STATE.range);
+}
+const labelRange = r => monthName(r[0]) + " – " + monthName(r[1]) + " · " + (r[1] - r[0] + 1) + " months";
+
+/* 5b. The shape-shifting city: map <-> cartogram <-> market space */
+const CITY = {};
+function setupCity() {
+  const svg = d3.select("#citySvg");
+  svg.append("defs").html(`<pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#f1f0ec"/><line x1="0" y1="0" x2="0" y2="6" stroke="#b9b8b1" stroke-width="2"/></pattern>`);
+  CITY.root = svg.append("g");
+  CITY.gTilt = CITY.root.append("g");                                    // the ground: polygons + metro (tilted in the skyline layout)
+  CITY.gPoly = CITY.gTilt.append("g"); CITY.gMetro = CITY.gTilt.append("g").style("pointer-events", "none");
+  CITY.gTow = CITY.root.append("g");                                     // towers stand on the ground
+
+  CITY.gAxes = svg.append("g").style("pointer-events", "none");
+  CITY.gBub = svg.append("g"); CITY.gLbl = svg.append("g");
+  CITY.gTop = svg.append("g").style("pointer-events", "none");           // annotations that must stay above the circles
+  CITY.clock = svg.append("text").attr("text-anchor", "end").attr("font-size", 40).attr("font-weight", 700).attr("fill", "#0b0b0b").attr("opacity", .16).style("pointer-events", "none");   // the date while playing
+  CITY.zoom = d3.zoom().scaleExtent([.25, 14]).on("zoom", ev => { CITY.t = ev.transform; CITY.root.attr("transform", ev.transform); placeBubbles(0);
+    CITY.gTop.style("visibility", Math.abs(ev.transform.k - 1) < .01 ? "visible" : "hidden"); });
+  CITY.t = d3.zoomIdentity; svg.call(CITY.zoom).on("dblclick.zoom", null);
+  $("#zin").onclick = () => svg.transition().duration(300).call(CITY.zoom.scaleBy, 1.6);
+  $("#zout").onclick = () => svg.transition().duration(300).call(CITY.zoom.scaleBy, 1 / 1.6);
+  $("#zcity").onclick = () => svg.transition().duration(600).call(CITY.zoom.transform, d3.zoomIdentity);
+  $("#zall").onclick = () => { const [[x0, y0], [x1, y1]] = CITY.path.bounds({ type: "FeatureCollection", features: DATA.comms.map(c => c.feature) });
+    const k = .94 * Math.min(CITY.W / (x1 - x0), CITY.H / (y1 - y0));
+    svg.transition().duration(700).call(CITY.zoom.transform, d3.zoomIdentity.translate(CITY.W / 2 - k * (x0 + x1) / 2, CITY.H / 2 - k * (y0 + y1) / 2).scale(k)); };
+}
+function sizeCity() {
+  const W = $("#cityWrap").clientWidth, H = Math.round(W < 560 ? W * 1.05 : Math.min(640, W * .72));
+  CITY.W = W; CITY.H = H; d3.select("#citySvg").attr("viewBox", `0 0 ${W} ${H}`);
+  /* frame the built-up city (Hatta and the deep desert are reachable with the Emirate button) */
+  CITY.proj = d3.geoMercator().fitExtent([[8, 8], [W - 8, H - 8]], { type: "MultiPoint", coordinates: [[55.0, 24.9], [55.47, 25.34]] });
+  CITY.path = d3.geoPath(CITY.proj);
+  DATA.comms.forEach(c => { const p = CITY.path.centroid(c.feature); c.cx = p[0]; c.cy = p[1]; });
+}
+/* the tilt used by the skyline layout: rotate about the centre, squash vertically, push down to leave sky for the towers */
+const TILT = { deg: -14, sy: .58, down: .27 };
+function tiltPt(x, y) { const { W, H } = CITY, a = TILT.deg * Math.PI / 180, dx = x - W / 2, dy = y - H / 2;
+  return [W / 2 + dx * Math.cos(a) - dy * Math.sin(a), (H / 2 + dx * Math.sin(a) + dy * Math.cos(a)) * TILT.sy + H * TILT.down]; }
+const tiltStr = on => on ? `translate(0,${CITY.H * TILT.down}) scale(1,${TILT.sy}) rotate(${TILT.deg},${CITY.W / 2},${CITY.H / 2})` : `translate(0,0) scale(1,1) rotate(0,${CITY.W / 2},${CITY.H / 2})`;
+function renderCity(animate) {
+  const st = STATE, dur = animate ? DUR() : (DUR() ? 250 : 0), M = VIEW.metric, stats = VIEW.stats, { W, H } = CITY;
+  const active = DATA.comms.filter(c => stats.get(c.id).n > 0);
+  const hi = st.hi, isDim = c => hi && !hi.has(c.id);
+  const lay = st.layout, ground = lay === "map" || lay === "towers";      // layouts in which the polygons are the main marks
+
+  /* --- polygons (map layer) --- */
+  const poly = CITY.gPoly.selectAll("path").data(DATA.comms, d => d.id).join("path").attr("class", "poly").attr("d", d => CITY.path(d.feature));
+  poly.classed("dim", isDim).classed("is-sel", d => ground && d.id === st.sel)
+    .on("pointermove", (ev, d) => showTip(ev, commTip(d))).on("pointerleave", hideTip).on("click", (ev, d) => select(d.id));
+  poly.transition().duration(dur).attr("fill", d => lay === "map" ? fillOf(d) : lay === "towers" ? (stats.get(d.id).n ? "#dedcd3" : "#ecebe6") : "#efeee9")
+    .style("opacity", lay === "scatter" || lay === "rings" ? 0 : lay === "cartogram" ? .55 : 1).style("pointer-events", ground ? "auto" : "none");
+  CITY.gTilt.transition().duration(animate ? DUR() : 0).attr("transform", tiltStr(lay === "towers"));
+  CITY.gPoly.selectAll("path.is-sel").raise();
+
+  /* --- metro overlay --- */
+  const lineOf = ids => d3.line().x(d => CITY.proj([d.lon, d.lat])[0]).y(d => CITY.proj([d.lon, d.lat])[1])(ids);
+  const S = DATA.stations, red = S.filter(s => /^R[1-4]/.test(s.id)), branch = [S.find(s => s.id === "R38")].concat(S.filter(s => /^R7/.test(s.id)), S.filter(s => s.id[0] === "E")), green = S.filter(s => s.id[0] === "G");
+  CITY.gMetro.selectAll("path").data([[red, "#e34948"], [branch, "#e34948"], [green, "#008300"]]).join("path").attr("d", d => lineOf(d[0])).attr("stroke", d => d[1]).attr("fill", "none").attr("stroke-width", 2.2).attr("vector-effect", "non-scaling-stroke").attr("stroke-linejoin", "round");
+  CITY.gMetro.selectAll("circle").data(S, d => d.id).join("circle").attr("cx", d => CITY.proj([d.lon, d.lat])[0]).attr("cy", d => CITY.proj([d.lon, d.lat])[1])
+    .attr("r", d => (d.id === st.pinStation ? 5 : 2.2) / Math.sqrt(CITY.t.k)).attr("fill", "#fff").attr("stroke", d => d.id === st.pinStation ? "#0b0b0b" : d.route === "Green" ? "#008300" : "#e34948").attr("stroke-width", 1.4).attr("vector-effect", "non-scaling-stroke");
+  CITY.gMetro.transition().duration(dur).style("opacity", st.metro && ground ? 1 : 0);
+  renderTowers(animate ? DUR() : 0);
+
+  /* --- bubble targets for each layout --- */
+  const maxN = STATE.playMax || d3.max(active, c => stats.get(c.id).n) || 1, rMax = Math.max(16, Math.min(W, H) * .085);
+  const rOf = c => Math.max(2.2, Math.sqrt(stats.get(c.id).n / maxN) * rMax);
+  active.forEach(c => { c.r = rOf(c); });
+  // cartogram: push circles apart but keep each as close to home as possible (deterministic: always starts from the centroids)
+  const nodes = active.map(c => ({ c, x: c.cx, y: c.cy, r: c.r }));
+  const sim = d3.forceSimulation(nodes).force("x", d3.forceX(d => d.c.cx).strength(.22)).force("y", d3.forceY(d => d.c.cy).strength(.22)).force("collide", d3.forceCollide(d => d.r + 1.2).iterations(3)).stop();
+  for (let i = 0; i < 220; i++) { sim.tick(); nodes.forEach(n => { n.x = Math.max(n.r + 2, Math.min(W - n.r - 2, n.x)); n.y = Math.max(n.r + 2, Math.min(H - n.r - 2, n.y)); }); }   // stay inside the frame
+  nodes.forEach(n => { n.c.dx = n.x; n.c.dy = n.y; });
+  // market space: x = median price (log), y = the colour measure (or number of sales when colour already is price)
+  const m = { l: 56, r: 22, t: 26, b: 46 }, pts = active.filter(c => stats.get(c.id).ok && (M.key === "price" || metricVal(c) != null));
+  const yIsCount = M.key === "price", yVal = c => yIsCount ? stats.get(c.id).n : metricVal(c);
+  const xe = d3.extent(pts, c => stats.get(c.id).med), x = d3.scaleLog([(xe[0] || 3000) * .8, (xe[1] || 60000) * 1.25], [m.l, W - m.r]);
+  const yLog = yIsCount || M.key === "per1000";
+  const yExt = d3.extent(pts, yVal), y = (yLog ? d3.scaleLog([Math.max(yExt[0] || 1, .05), yExt[1] || 10], [H - m.b, m.t]) : d3.scaleLinear(M.key === "offshare" || M.key === "afford" ? [0, 1] : [Math.min(0, yExt[0] ?? 0), yExt[1] ?? 1], [H - m.b, m.t])).nice();
+  const inScatter = new Set(pts.map(c => c.id));
+  active.forEach(c => { if (inScatter.has(c.id)) { c.sx = x(stats.get(c.id).med); c.sy = y(yVal(c)); } });
+  CITY.inScatter = inScatter;
+
+  /* --- axes for market space --- */
+  CITY.gAxes.selectAll("*").remove();
+  if (st.layout === "scatter") {
+    const yf = M.key === "growth" ? d3.format("+.0%") : (M.key === "offshare" || M.key === "afford") ? fPct : M.key === "dist" ? (v => v + " km") : (v => v >= 1000 ? d3.format("~s")(v) : String(+v.toPrecision(2)));
+    CITY.gAxes.append("g").attr("class", "grid").attr("transform", `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(5).tickSize(-(W - m.l - m.r)).tickFormat(""));
+    CITY.gAxes.append("g").attr("class", "axis").attr("transform", `translate(0,${H - m.b})`).call(d3.axisBottom(x).ticks(W < 520 ? 4 : 7, "~s").tickSizeOuter(0));
+    CITY.gAxes.append("g").attr("class", "axis").attr("transform", `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(5).tickFormat(yf)).call(g => g.select(".domain").remove());
+    CITY.gAxes.append("text").attr("class", "note").attr("x", W - m.r).attr("y", H - 10).attr("text-anchor", "end").text("median price per m² (AED, log scale) →");
+    CITY.gAxes.append("text").attr("class", "note").attr("x", 8).attr("y", 14).text("↑ " + (yIsCount ? "number of sales (log scale)" : M.label.toLowerCase() + (yLog ? " (log scale)" : "")));
+    if (M.key === "growth" && VIEW.city.growth != null) {
+      const gy = y(VIEW.city.growth), gx = x(VIEW.city.med);
+      CITY.gAxes.append("line").attr("x1", m.l).attr("x2", W - m.r).attr("y1", gy).attr("y2", gy).attr("stroke", COL.ink2).attr("stroke-dasharray", "4 3");
+      CITY.gAxes.append("line").attr("x1", gx).attr("x2", gx).attr("y1", m.t).attr("y2", H - m.b).attr("stroke", COL.ink2).attr("stroke-dasharray", "4 3");
+      CITY.gAxes.append("text").attr("class", "note").attr("x", W - m.r).attr("y", gy - 5).attr("text-anchor", "end").text("city: " + d3.format("+.1%")(VIEW.city.growth) + " a year");
+      CITY.gAxes.append("text").attr("class", "note").attr("x", m.l + 8).attr("y", m.t + 12).style("font-weight", 600).text("cheaper than the city, rising faster");
+      CITY.gAxes.append("text").attr("class", "note").attr("x", W - m.r - 4).attr("y", H - m.b - 8).attr("text-anchor", "end").text("pricier, rising slower");
+    }
+    if (!pts.length) { CITY.gAxes.selectAll("*").remove();          // nothing to place: say so instead of drawing empty axes
+      CITY.gAxes.append("text").attr("x", W / 2).attr("y", H / 2).attr("text-anchor", "middle").attr("font-size", 14).attr("fill", COL.ink2).text("No community has enough sales here to be placed. Widen the period or relax the filters."); }
+    CITY.gAxes.style("opacity", 0).transition().delay(dur * .5).duration(400).style("opacity", 1);
+  }
+
+  /* --- bubbles: the SAME elements in every layout (object constancy) --- */
+  CITY.gBub.selectAll("circle").data(active, d => d.id).join(
+      en => en.append("circle").attr("class", "bubble").attr("cx", d => CITY.t.applyX(d.cx)).attr("cy", d => CITY.t.applyY(d.cy)).attr("r", 0),
+      up => up.classed("gone", false), ex => ex.classed("gone", true).style("pointer-events", "none").transition().duration(DUR() ? 300 : 0).attr("r", 0).remove())
+    .classed("dim", isDim).classed("is-sel", d => d.id === st.sel)
+    .each(function (d) { const k = st.persona === "investor" ? st.compare.indexOf(d.id) : -1;       // shortlist ring
+      d3.select(this).style("stroke", k >= 0 ? CMP_COL[k] : null, "important").style("stroke-width", k >= 0 ? "3.5px" : null, "important"); })
+    .on("pointermove", (ev, d) => showTip(ev, commTip(d))).on("pointerleave", hideTip).on("click", (ev, d) => select(d.id));
+  if (st.persona === "investor") CITY.gBub.selectAll("circle").filter(d => st.compare.includes(d.id)).raise();
+  placeBubbles(dur, animate);
+
+  /* --- direct labels: only the biggest few + the selected one --- */
+  const nLab = W < 520 ? 4 : 7, labelled = ground ? [] : d3.sort(active.filter(c => st.layout !== "scatter" || inScatter.has(c.id)), c => -stats.get(c.id).n).slice(0, nLab);
+  const selC = DATA.commById.get(st.sel); if (lay !== "towers" && selC && stats.get(selC.id).n > 0 && !labelled.includes(selC) && (st.layout !== "scatter" || inScatter.has(selC.id))) labelled.push(selC);
+  CITY.gLbl.selectAll("text").data(labelled, d => d.id).join("text").attr("class", "lbl").attr("text-anchor", "middle").text(d => short(d)).style("opacity", 0);
+  placeLabels(dur);
+
+  /* --- chrome --- */
+  const fixed = lay === "scatter" || lay === "rings";                    // layouts with their own coordinates: no pan / zoom
+  $("#cityHint").textContent = fixed ? "tap a circle to select · the same circles in every layout" : "drag to move · scroll or pinch to zoom · tap to select";
+  d3.selectAll(".zoomBtns").style("display", fixed ? "none" : null);
+  $("#metroChk").style.visibility = ground ? "visible" : "hidden";      // keep its space so nothing shifts
+  renderLegend();
+}
+const short = c => (c.project && c.project.length < 26 ? title(c.project) : c.name).replace("Jumeirah Village Circle", "JVC").replace(" Master Community", "");
+function bubblePos(c) {
+  const st = STATE, t = CITY.t;
+  if (st.layout === "scatter") return CITY.inScatter.has(c.id) ? [c.sx, c.sy, c.r] : [c.sx ?? t.applyX(c.cx), c.sy ?? t.applyY(c.cy), 0];
+  if (st.layout === "cartogram") return [t.applyX(c.dx), t.applyY(c.dy), c.r * Math.sqrt(t.k)];
+  if (st.layout === "rings") return [c.gx, c.gy, c.gr];
+  if (st.layout === "towers") { const p = tiltPt(c.cx, c.cy); return [t.applyX(p[0]), t.applyY(p[1]), 0]; }
+  return [t.applyX(c.cx), t.applyY(c.cy), 0];                                   // map: circles collapse into their centroid
+}
+function placeBubbles(dur, stagger) {
+  const sel = CITY.gBub.selectAll("circle:not(.gone)");            // leaving circles keep their own exit transition
+  (dur ? sel.transition().duration(dur).delay(stagger ? (d, i) => i * 4 : 0).ease(d3.easeCubicInOut) : sel.interrupt())
+    .attr("cx", d => bubblePos(d)[0]).attr("cy", d => bubblePos(d)[1]).attr("r", d => bubblePos(d)[2]).attr("fill", d => metricVal(d) != null ? VIEW.metric.color(metricVal(d)) : "#d8d6ce");
+  if (!dur) placeLabels(0);
+}
+function placeLabels(dur) {
+  const sel = CITY.gLbl.selectAll("text").attr("x", d => bubblePos(d)[0]).attr("y", d => bubblePos(d)[1] - bubblePos(d)[2] - 4);
+  if (dur) sel.transition().delay(dur).duration(300).style("opacity", 1); else sel.style("opacity", 1);
+}
+function renderLegend() {
+  const M = VIEW.metric, st = STATE;
+  let h = `<b>${M.label}</b>` + M.legend.map((t, i) => `<span><i class="sw" style="background:${M.cols[i]}"></i>${t}</span>`).join("");
+  if (!M.always) h += `<span><i class="sw" style="background:repeating-linear-gradient(45deg,#b9b8b1 0 2px,#f1f0ec 2px 5px)"></i>too few sales to rate</span>`;
+  h += `<span><i class="sw" style="background:${COL.nodata}"></i>no sales</span>`;
+  if (st.layout !== "map") h += `<span>◯ circle area = number of sales</span>`;
+  if (st.layout === "towers" && st.metric === "price") h = `<b>Tower height = ${st.persona === "investor" ? "median price per m² now" : "median price of a " + st.rooms.replace("B/R", "bedroom") + " home"}</b><span><i class="sw" style="background:#0b0b0b;height:3px"></i>black line = ${st.persona === "investor" ? "price at the start of the period" : "my budget, on towers that rise above it"}</span><span><b>Colour = median price per m²</b></span>` + M.legend.map((t, i) => `<span><i class="sw" style="background:${M.cols[i]}"></i>${t}</span>`).join("") + `<span><i class="sw" style="background:#c9c8c2"></i>too few sales to rate</span>`;
+  else if (st.layout === "towers" && st.persona === "investor") h = `<b>Tower height = median price per m² now</b><span><i class="sw" style="background:#0b0b0b;height:3px"></i>black line = price at the start of the period</span><span><b>Colour = growth a year against the city</b></span>` + M.legend.map((t, i) => `<span><i class="sw" style="background:${M.cols[i]}"></i>${t}</span>`).join("") + `<span>no tower = too few sales at one end of the period</span>`;
+  else if (st.layout === "towers") h = `<b>Tower height = median price of a ${st.rooms.replace("B/R", "bedroom")} home</b><span><i class="sw" style="background:#1baf7a"></i>within my budget (AED ${fAED(st.budget)})</span><span><i class="sw" style="background:#a9dcc6"></i>up to my budget</span><span><i class="sw" style="background:#eb6834"></i>the part above my budget</span><span>no tower = too few sales of that home</span>`;
+  const pin = st.pinStation && DATA.stations.find(s => s.id === st.pinStation);
+  $("#cityLegend").innerHTML = h + `<span style="flex-basis:100%">${st.layout === "towers" ? (st.persona === "investor" ? "median price per m² in the first and the last " + VIEW.win + " months of the period" : "median total price of the chosen home in the period") + "; towers taller than the tallest 5% are capped" : M.note}</span>` + (pin ? `<span style="flex-basis:100%"><b>Highlighted:</b> communities within ${st.catchKm} km of ${pin.name} station. </span><button class="btn" id="clearPin" type="button">Clear highlight</button>` : "");
+  if (pin) $("#clearPin").onclick = () => { STATE.pinStation = null; STATE.hi = null; update(false); };
+  $("#v1Sub").innerHTML = { map: "<b>Map.</b> Every community in its real place; colour = the measure. Good for “where”, poor for “how many”: big empty communities dominate.",
+    cartogram: "<b>Cartogram.</b> Each community becomes a circle sized by its number of sales and nudged just enough not to overlap. Now the market's real centre of gravity is visible.",
+    towers: st.persona === "investor" ? "<b>Growth skyline.</b> Each tower is today's price per m²; the black line is where it stood at the start of the period. Red rose faster than the city, blue slower."
+      : "<b>Budget skyline.</b> The map lies flat and each community grows a tower as tall as the price of your home there. Move the budget slider and watch the orange recede.",
+    rings: "<b>Distance rings.</b> The same communities leave the map: distance from the centre = distance to the nearest metro station, direction = compass bearing from Downtown, circle size = sales. Circles are nudged a little so they do not overlap; the colour gives the exact band.",
+    scatter: "<b>Market space.</b> The same circles leave the map: left–right is price, up–down is the measure. Position now answers “how much” exactly." }[st.layout];
+}
+function commTip(c) {
+  const s = VIEW.stats.get(c.id), M = VIEW.metric, v = metricVal(c);
+  let h = `<b>${c.name}</b><br><span class="muted">${c.project ? title(c.project) + " · " : ""}community ${c.id}</span><table>`;
+  h += `<tr><td>Sales in period</td><td>${fInt(s.n)}</td></tr>`;
+  if (s.n) h += `<tr><td>Median price / m²</td><td>${s.ok ? "AED " + fPm(s.med) : "too few sales"}</td></tr>`;
+  if (M.key !== "price") h += `<tr><td>${M.label}</td><td>${v != null ? M.fmt(v) : "not rated"}</td></tr>`;
+  if (s.n) h += `<tr><td>Off-plan share</td><td>${fPct(s.off)}</td></tr>`;
+  h += `<tr><td>Nearest metro</td><td>${c.km.toFixed(1)} km</td></tr><tr><td>Population 2019</td><td>${fInt(c.pop)}</td></tr></table>`;
+  return h;
+}
+
+/* 5c. Ranked list (length on a common scale answers "which is highest" instantly) */
+function renderRank() {
+  /* each lens gets the ranking that answers its question; a row = { c, n, bar (length), val (right text), sub, col } */
+  const M = VIEW.metric, st = STATE, stats = VIEW.stats, all = DATA.comms.map(c => ({ c, s: stats.get(c.id) })).filter(d => d.s.n > 0);
+  let rows, head, empty = "No community has enough matching sales. Widen the period or lower the minimum.";
+  if (M.key === "afford") {            // buyer: where the chosen home's median is within budget, most traded first
+    rows = d3.sort(all.filter(d => d.s.homeMed != null && d.s.homeMed <= st.budget), d => -d.s.nMatch).slice(0, 8)
+      .map(d => ({ c: d.c, bar: d.s.nMatch, val: "AED " + fAED(d.s.homeMed), sub: d.s.nMatch + " sales · " + Math.round(d.s.homeSize) + " m²", col: "#1baf7a" }));
+    head = "Within budget, most traded first · " + st.rooms; empty = "No community's median " + st.rooms + " is within this budget. Raise the budget or change bedrooms.";
+  } else if (M.key === "offshare") {   // developer: where the off-plan sales are, not just the highest percentage
+    rows = d3.sort(all.filter(d => d.s.ok), d => -d.s.off * d.s.n).slice(0, 8)
+      .map(d => ({ c: d.c, bar: d.s.off * d.s.n, val: fPct(d.s.off), sub: fInt(Math.round(d.s.off * d.s.n)) + " off-plan sales", col: M.color(d.s.off) }));
+    head = "Most off-plan sales in the period";
+  } else if (M.key === "dist") {       // planner: the busiest communities far from any station
+    rows = d3.sort(all.filter(d => d.c.km > 4), d => -d.s.n).slice(0, 8)
+      .map(d => ({ c: d.c, bar: d.s.n, val: d.c.km.toFixed(1) + " km", sub: fInt(d.s.n) + " sales", col: M.color(d.c.km) }));
+    head = "Busiest 8 more than 4 km from a station";
+  } else {                             // every other measure: highest value first, ties broken by sales
+    rows = d3.sort(all.map(d => Object.assign(d, { v: metricVal(d.c) })).filter(d => d.v != null), (p, q) => d3.descending(p.v, q.v) || d3.descending(p.s.n, q.s.n)).slice(0, 8)
+      .map(d => ({ c: d.c, bar: Math.abs(d.v), val: M.fmt(d.v), sub: fInt(d.s.n) + " sales", col: M.color(d.v) }));
+    head = "Top 8 · " + M.label.toLowerCase();
+  }
+  const max = d3.max(rows, d => d.bar) || 1;
+  $("#rankTitle").textContent = head;
+  d3.select("#rank").selectAll("p").remove();
+  d3.select("#rank").selectAll("div.rank-row").data(rows, d => d.c.id).join("div").attr("class", "rank-row").classed("on", d => d.c.id === st.sel)
+    .html(d => `<div><div class="nm">${short(d.c)} <span class="muted small">· ${d.sub}</span></div><div class="rank-bar" style="width:${Math.max(2, d.bar / max * 100)}%;background:${d.col}"></div></div><div class="rank-val">${d.val}</div>`)
+    .on("click", (ev, d) => select(d.c.id))
+    .on("pointerenter", (ev, d) => { if (ev.pointerType === "mouse") setHi(new Set([d.c.id])); }).on("pointerleave", ev => { if (ev.pointerType === "mouse") setHi(null); });
+  if (!rows.length) $("#rank").innerHTML = `<p class="small muted">${empty}</p>`;
+}
+
+/* 5d. Community profile: price line with quartile band + bedroom price ladder */
+function renderProfile() {
+  const st = STATE, c = DATA.commById.get(st.sel), s = VIEW.stats.get(c.id), box = d3.select("#profile");
+  const nQ = Math.ceil(CFG.nMonths / 3), rowsAll = VIEW.F.filter(d => d.comm === c.id), rows = rowsAll.filter(d => d.m >= st.range[0] && d.m <= st.range[1]);
+  box.html(`<div class="tag">Selected community</div><h3 style="font-size:17px;margin:0">${c.project && c.project.length < 34 ? title(c.project) : c.name}</h3>
+    <div class="small muted">${c.project && c.project.length < 34 && title(c.project) !== c.name ? "DLD area " + c.name + " · " : ""}Dubai Municipality community ${c.id} (${c.dm})</div>
+    <div class="tiles">
+      <div class="tile"><div class="v">${fInt(s.n)}</div><div class="k">sales in period</div></div>
+      <div class="tile"><div class="v">${s.ok ? fPm(s.med) : "n/a"}</div><div class="k">median AED / m²</div></div>
+      <div class="tile"><div class="v">${s.growth != null ? d3.format("+.1%")(s.growth) : "n/a"}</div><div class="k">price change a year</div></div>
+      <div class="tile"><div class="v">${s.n ? fPct(s.off) : "n/a"}</div><div class="k">off-plan share</div></div>
+      <div class="tile"><div class="v">${c.km.toFixed(1)} km</div><div class="k">to nearest metro</div></div>
+      <div class="tile"><div class="v">${s.per1000 != null ? (s.per1000 >= 100 ? fInt(s.per1000) : s.per1000.toFixed(1)) : "n/a"}</div><div class="k">sales per 1,000 residents</div></div>
+    </div>
+    ${["buyer", "developer"].includes(st.persona) ? `<h3>Price ladder <span class="muted" style="font-weight:400">· total price by bedrooms, in the period${st.persona === "buyer" ? " · rule = my budget" : ""}</span></h3><svg id="pLadder"></svg>` : ""}
+    <h3 style="margin-top:10px">Median price per m² by quarter <span class="muted" style="font-weight:400">· band = middle half of sales · grey = city</span></h3><svg id="pLine"></svg>`);
+
+  /* quarterly line */
+  const W = box.node().clientWidth - 24, H = 150, m = { l: 40, r: 10, t: 8, b: 20 };
+  const q = d3.range(nQ).map(i => ({ q: i })), byQ = d3.group(rowsAll, d => d.q), cityQ = d3.rollup(VIEW.F, v => d3.median(v, d => d.ppm), d => d.q);
+  q.forEach(d => { const r = (byQ.get(d.q) || []).map(e => e.ppm).sort(d3.ascending); d.n = r.length; d.med = r.length >= 3 ? quant(r, .5) : null; d.q1 = r.length >= 5 ? quant(r, .25) : null; d.q3 = r.length >= 5 ? quant(r, .75) : null; d.city = cityQ.get(d.q); });
+  const x = d3.scaleLinear([0, nQ - 1], [m.l, W - m.r]), y = d3.scaleLinear([0, d3.max(q, d => Math.max(d.q3 || 0, d.med || 0, d.city || 0)) || 1], [H - m.b, m.t]).nice(4);
+  const svg = d3.select("#pLine").attr("viewBox", `0 0 ${W} ${H}`);
+  svg.append("rect").attr("x", x(st.range[0] / 3)).attr("width", Math.max(2, x((st.range[1] + 1) / 3) - x(st.range[0] / 3))).attr("y", m.t).attr("height", H - m.b - m.t).attr("fill", "#0d366b").attr("opacity", .07);
+  svg.append("g").attr("class", "grid").attr("transform", `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(4).tickSize(-(W - m.l - m.r)).tickFormat(""));
+  svg.append("g").attr("class", "axis").attr("transform", `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(4, "~s")).call(g => g.select(".domain").remove());
+  svg.append("g").attr("class", "axis").attr("transform", `translate(0,${H - m.b})`).call(d3.axisBottom(x).tickValues(d3.range(0, nQ, 8)).tickFormat(v => CFG.y0 + v / 4).tickSizeOuter(0));
+  svg.append("path").attr("fill", COL.ready).attr("opacity", .18).attr("d", d3.area().defined(d => d.q1 != null).x(d => x(d.q)).y0(d => y(d.q1)).y1(d => y(d.q3))(q));
+  svg.append("path").attr("fill", "none").attr("stroke", "#a3a29b").attr("stroke-width", 1.5).attr("d", d3.line().defined(d => d.city != null).x(d => x(d.q)).y(d => y(d.city))(q));
+  svg.append("path").attr("fill", "none").attr("stroke", COL.ready).attr("stroke-width", 2).attr("d", d3.line().defined(d => d.med != null).x(d => x(d.q)).y(d => y(d.med))(q));
+  svg.selectAll("circle").data(q.filter(d => d.med != null)).join("circle").attr("cx", d => x(d.q)).attr("cy", d => y(d.med)).attr("r", 2).attr("fill", COL.ready);
+  const cross = svg.append("line").attr("y1", m.t).attr("y2", H - m.b).attr("stroke", COL.ink2).style("opacity", 0);
+  svg.append("rect").attr("x", m.l).attr("y", m.t).attr("width", W - m.l - m.r).attr("height", H - m.b - m.t).attr("fill", "transparent")
+    .on("pointermove", ev => { const i = Math.max(0, Math.min(nQ - 1, Math.round(x.invert(d3.pointer(ev)[0])))), d = q[i]; cross.attr("x1", x(i)).attr("x2", x(i)).style("opacity", 1);
+      showTip(ev, `<b>${quarterName(i)}</b><table><tr><td>${c.name}</td><td>${d.med != null ? "AED " + fPm(d.med) : "under 3 sales"}</td></tr><tr><td>Sales</td><td>${d.n}</td></tr><tr><td>City median</td><td>${d.city ? "AED " + fPm(d.city) : "n/a"}</td></tr></table>`); })
+    .on("pointerleave", () => { cross.style("opacity", 0); hideTip(); });
+
+  if (!$("#pLadder")) return;
+  /* price ladder: one row per bedroom count */
+  const lad = CFG.rooms.map((name, i) => { const w = rows.filter(d => d.rooms === i).map(d => d.worth).sort(d3.ascending), sz = rows.filter(d => d.rooms === i).map(d => d.size).sort(d3.ascending);
+    return { name, i, n: w.length, q1: quant(w, .25), med: quant(w, .5), q3: quant(w, .75), p10: quant(w, .1), p90: quant(w, .9), size: quant(sz, .5), under: w.length ? d3.mean(w, v => v <= st.budget ? 1 : 0) : null }; });
+  const H2 = 26 * lad.length + 26, m2 = { l: 58, r: 92, t: 4, b: 22 }, isBuyer = st.persona === "buyer", ok = lad.filter(d => d.n >= 5);
+  const lx = d3.scaleLog([Math.min(st.budget, d3.min(ok, d => d.p10) ?? 3e5) * .85, Math.max(st.budget, d3.max(ok, d => d.p90) ?? 5e6) * 1.15], [m2.l, W - m2.r]);
+  const ly = d3.scaleBand(CFG.rooms, [m2.t, H2 - m2.b]).padding(.3);
+  const sv2 = d3.select("#pLadder").attr("viewBox", `0 0 ${W} ${H2}`);
+  sv2.append("g").attr("class", "axis").attr("transform", `translate(0,${H2 - m2.b})`).call(d3.axisBottom(lx).tickValues([1e5, 2.5e5, 5e5, 1e6, 2e6, 5e6, 1e7, 2e7, 5e7].filter(v => v >= lx.domain()[0] && v <= lx.domain()[1])).tickFormat(v => fAED(v)).tickSizeOuter(0));
+  const g = sv2.selectAll("g.row").data(lad).join("g").attr("class", "row").attr("transform", d => `translate(0,${ly(d.name)})`).style("cursor", "pointer")
+    .on("click", (ev, d) => { if (!isBuyer) return; STATE.rooms = d.name; update(false); })
+    .on("pointermove", (ev, d) => showTip(ev, `<b>${d.name} in ${c.name}</b><table><tr><td>Sales</td><td>${d.n}</td></tr>${d.n >= 5 ? `<tr><td>Middle half</td><td>AED ${fAED(d.q1)}–${fAED(d.q3)}</td></tr><tr><td>Median</td><td>AED ${fAED(d.med)}</td></tr><tr><td>Median size</td><td>${Math.round(d.size)} m²</td></tr><tr><td>Within budget</td><td>${fPct(d.under)}</td></tr>` : `<tr><td colspan=2>too few sales to summarise</td></tr>`}</table>`)).on("pointerleave", hideTip);
+  g.append("rect").attr("x", 0).attr("width", W).attr("height", ly.bandwidth()).attr("fill", d => isBuyer && d.name === st.rooms ? "#efeee9" : "transparent").attr("y", -3).attr("height", ly.bandwidth() + 6).attr("rx", 4);
+  g.append("text").attr("x", 4).attr("y", ly.bandwidth() / 2).attr("dy", ".35em").attr("font-size", 12).attr("font-weight", d => isBuyer && d.name === st.rooms ? 700 : 400).text(d => d.name);
+  g.filter(d => d.n >= 5).append("line").attr("x1", d => lx(d.p10)).attr("x2", d => lx(d.p90)).attr("y1", ly.bandwidth() / 2).attr("y2", ly.bandwidth() / 2).attr("stroke", "#a3a29b");
+  g.filter(d => d.n >= 5).append("rect").attr("x", d => lx(d.q1)).attr("width", d => Math.max(2, lx(d.q3) - lx(d.q1))).attr("height", ly.bandwidth()).attr("rx", 3).attr("fill", COL.ready).attr("opacity", .75);
+  g.filter(d => d.n >= 5).append("rect").attr("x", d => lx(d.med) - 1.5).attr("width", 3).attr("y", -2).attr("height", ly.bandwidth() + 4).attr("fill", "#0d366b");
+  g.append("text").attr("x", W - 2).attr("y", ly.bandwidth() / 2).attr("dy", ".35em").attr("text-anchor", "end").attr("class", "note").text(d => d.n >= 5 ? Math.round(d.size) + " m² · n=" + d.n : d.n ? "n=" + d.n + " (few)" : "none");
+  if (isBuyer) sv2.append("line").attr("x1", lx(st.budget)).attr("x2", lx(st.budget)).attr("y1", 0).attr("y2", H2 - m2.b).attr("stroke", "#0b0b0b").attr("stroke-width", 1.5).attr("stroke-dasharray", "5 3");
+}
+
+
+
+
+/* ---------- persona-specific views ---------- */
+const CMP_COL = ["#2a78d6", "#eb6834", "#1baf7a"];       // shortlist slots (colour follows the slot, never the rank)
+const inRange = d => d.m >= STATE.range[0] && d.m <= STATE.range[1];
+
+/* INVESTOR · shortlist: indexed price lines + liquidity bars */
+function addCompare(id) {
+  const c = STATE.compare; if (c.includes(id)) return;
+  let i = c.indexOf(null); if (i < 0) { i = STATE.cmpNext % 3; STATE.cmpNext++; } c[i] = id;
+}
+function seedCompare() {                                  // a sensible first shortlist: the selection plus the two fastest risers with real liquidity
+  if (STATE.compare.some(v => v != null)) return;
+  const cand = DATA.comms.map(c => ({ c, s: VIEW.stats.get(c.id) })).filter(d => d.s.growth != null && d.s.n >= 150 && d.c.id !== STATE.sel);
+  [STATE.sel].concat(d3.sort(cand, d => -d.s.growth).slice(0, 2).map(d => d.c.id)).forEach(addCompare);
+}
+function renderCompare() {
+  const st = STATE, slots = st.compare.map((id, i) => id == null ? null : { id, i, c: DATA.commById.get(id), col: CMP_COL[i] }).filter(Boolean);
+  d3.select("#chips").selectAll("button").data(slots, d => d.id).join("button").attr("class", "chip").style("--c", d => d.col)
+    .html(d => `<i></i>${short(d.c)} <span aria-hidden="true">×</span>`).attr("aria-label", d => "Remove " + short(d.c))
+    .on("click", (ev, d) => { st.compare[d.i] = null; update(false); });
+  const qa = Math.floor(st.range[0] / 3), qb = Math.floor(st.range[1] / 3), qs = d3.range(qa, qb + 1);
+  const series = (rows) => { const by = d3.group(rows, d => d.q); let base = null;
+    return qs.map(q => { const r = by.get(q) || [], v = r.length >= 4 ? d3.median(r, d => d.ppm) : null; if (v != null && base == null) base = v; return { q, n: r.length, v, idx: v != null && base ? v / base * 100 : null }; }); };
+  const Fr = VIEW.Fr, city = series(Fr); slots.forEach(s => s.ser = series(Fr.filter(d => d.comm === s.id)));
+  /* price index */
+  const W = $("#cmpSvg").parentNode.clientWidth - 24, H = 300, m = { l: 40, r: W < 430 ? 14 : 112, t: 12, b: 24 }, svg = d3.select("#cmpSvg").attr("viewBox", `0 0 ${W} ${H}`); svg.selectAll("*").remove();
+  const all = slots.flatMap(s => s.ser).concat(city).map(d => d.idx).filter(v => v != null);
+  const x = d3.scaleLinear([qa, Math.max(qb, qa + 1)], [m.l, W - m.r]), y = d3.scaleLinear([Math.min(80, d3.min(all) ?? 80), Math.max(120, d3.max(all) ?? 120)], [H - m.b, m.t]).nice(5);
+  svg.append("g").attr("class", "grid").attr("transform", `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(5).tickSize(-(W - m.l - m.r)).tickFormat(""));
+  svg.append("g").attr("class", "axis").attr("transform", `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(5)).call(g => g.select(".domain").remove());
+  svg.append("g").attr("class", "axis").attr("transform", `translate(0,${H - m.b})`).call(d3.axisBottom(x).tickValues(qs.filter(q => q % 4 === 0)).tickFormat(v => CFG.y0 + v / 4).tickSizeOuter(0));
+  svg.append("line").attr("x1", m.l).attr("x2", W - m.r).attr("y1", y(100)).attr("y2", y(100)).attr("stroke", COL.ink2);
+  const line = d3.line().defined(d => d.idx != null).x(d => x(d.q)).y(d => y(d.idx));
+  const draw = (ser, col, w, name) => { const ok = ser.filter(d => d.idx != null); if (!ok.length) return;
+    svg.append("path").attr("fill", "none").attr("stroke", col).attr("stroke-width", w).attr("d", line(ok));           // gaps are bridged; dots show the quarters that exist
+    svg.selectAll(null).data(ok).join("circle").attr("cx", d => x(d.q)).attr("cy", d => y(d.idx)).attr("r", w > 2 ? 2.4 : 0).attr("fill", col);
+    const last = ok[ok.length - 1]; if (W >= 430) svg.append("text").attr("class", "note").attr("x", x(last.q) + 6).attr("y", y(last.idx)).attr("dy", ".35em").text((name.length > 15 ? name.slice(0, 14) + "…" : name) + " " + Math.round(last.idx)); };
+  draw(city, "#a3a29b", 1.6, "City"); slots.forEach(s => draw(s.ser, s.col, 2.4, short(s.c)));
+  const cross = svg.append("line").attr("y1", m.t).attr("y2", H - m.b).attr("stroke", COL.ink2).style("opacity", 0);
+  svg.append("rect").attr("x", m.l).attr("y", m.t).attr("width", W - m.l - m.r).attr("height", H - m.b - m.t).attr("fill", "transparent")
+    .on("pointermove", ev => { const q = Math.max(qa, Math.min(qb, Math.round(x.invert(d3.pointer(ev)[0])))), k = q - qa; cross.attr("x1", x(q)).attr("x2", x(q)).style("opacity", 1);
+      showTip(ev, `<b>${quarterName(q)}</b><table>${slots.map(s => `<tr><td><i class="sw" style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${s.col}"></i> ${short(s.c)}</td><td>${s.ser[k].idx != null ? Math.round(s.ser[k].idx) : "–"}</td><td>${s.ser[k].v ? fPm(s.ser[k].v) + "/m²" : "under 4 sales"}</td></tr>`).join("")}<tr><td>City</td><td>${city[k].idx != null ? Math.round(city[k].idx) : "–"}</td><td>${city[k].v ? fPm(city[k].v) + "/m²" : ""}</td></tr></table>`); })
+    .on("pointerleave", () => { cross.style("opacity", 0); hideTip(); });
+  if (!slots.length) svg.append("text").attr("class", "note").attr("x", m.l + 8).attr("y", m.t + 14).text("Click a circle in the market space to add it here.");
+  /* liquidity: one row of bars per shortlisted community, common y scale */
+  const W2 = $("#liqSvg").parentNode.clientWidth - 24, rh = 84, m2 = { l: 40, r: 10, t: 6, b: 24 }, H2 = Math.max(1, slots.length) * rh + m2.b + m2.t, s2 = d3.select("#liqSvg").attr("viewBox", `0 0 ${W2} ${H2}`); s2.selectAll("*").remove();
+  const x2 = d3.scaleBand(qs, [m2.l, W2 - m2.r]).padding(.18), nMax = d3.max(slots.flatMap(s => s.ser), d => d.n) || 1, y2 = d3.scaleLinear([0, nMax], [rh - 26, 0]);
+  s2.append("g").attr("class", "axis").attr("transform", `translate(0,${H2 - m2.b})`).call(d3.axisBottom(x2).tickValues(qs.filter(q => q % (qs.length > 28 ? 8 : 4) === 0)).tickFormat(v => CFG.y0 + v / 4).tickSizeOuter(0));
+  const rg = s2.selectAll("g.lr").data(slots).join("g").attr("class", "lr").attr("transform", (d, i) => `translate(0,${m2.t + i * rh + 20})`);
+  rg.append("text").attr("x", m2.l).attr("y", -6).attr("font-size", 12).attr("font-weight", 600).attr("fill", COL.ink).text(d => short(d.c) + " · " + fInt(d3.sum(d.ser, e => e.n)) + " sales, median " + Math.round(d3.median(d.ser, e => e.n)) + " a quarter");
+  rg.append("g").attr("class", "axis").attr("transform", `translate(${m2.l},0)`).call(d3.axisLeft(y2).ticks(2)).call(g => g.select(".domain").remove());
+  rg.selectAll("rect").data(d => d.ser.map(e => Object.assign({ col: d.col, nm: short(d.c) }, e))).join("rect").attr("x", d => x2(d.q)).attr("width", x2.bandwidth()).attr("y", d => y2(d.n)).attr("height", d => y2(0) - y2(d.n)).attr("rx", 2).attr("fill", d => d.col)
+    .on("pointermove", (ev, d) => showTip(ev, `<b>${d.nm}</b><br>${quarterName(d.q)}${d.q === Math.floor((CFG.nMonths - 1) / 3) ? " (Jul–Aug only)" : ""}: ${d.n} sales`)).on("pointerleave", hideTip);
+}
+
+/* PRICE SKYLINE: the map is tilted and every community grows a tower.
+   Buyer lens:    height = median price of the chosen home; the part above the budget is orange.
+   Investor lens: height = median price per m2 at the end of the period; black line = start of the period; colour = growth vs the city. */
+function renderTowers(dur) {
+  const st = STATE, on = st.layout === "towers", inv = st.persona === "investor", { H } = CITY, stats = VIEW.stats, GREEN = "#1baf7a", PALE = "#a9dcc6", OVER = "#eb6834";
+  const has = c => { const s = stats.get(c.id); return inv ? s.ok && s.early && s.late : s.homeMed != null; };
+  const data = on ? DATA.comms.filter(has).map(c => { const p = tiltPt(c.cx, c.cy), s = stats.get(c.id);
+    return { c, id: c.id, x: p[0], y: p[1], v: inv ? s.late.med : s.homeMed, v0: inv ? s.early.med : null, g: s.growth }; }).sort((a, b) => a.y - b.y) : [];
+  const vmax = d3.quantile(data.map(d => d.v).sort(d3.ascending), .95) || 1, hOf = v => Math.min(v / vmax, 1.35) * H * .25;   // very tall towers are capped so the rest stay readable
+  const w = 9, dx = 5, dy = 3.5, hb = hOf(st.budget);
+  const g0 = VIEW.city.growth || 0, gcol = d3.scaleThreshold([-.06, -.03, -.01, .01, .03, .06], COL.diverging);
+  const prism = (y0, y1, col) => { const c = d3.color(col);            // three faces: front, side (darker), top (lighter)
+    return `<path d="M${-w / 2},${-y0}h${w}V${-y1}h${-w}Z" fill="${col}"/><path d="M${w / 2},${-y0}l${dx},${-dy}V${-y1 - dy}l${-dx},${dy}Z" fill="${c.darker(.7)}"/><path d="M${-w / 2},${-y1}h${w}l${dx},${-dy}h${-w}Z" fill="${c.brighter(.5)}"/>`; };
+  const pick = inv ? d3.sort(data.filter(d => d.g != null && stats.get(d.id).n >= 150), d => -d.g) : d3.sort(data.filter(d => d.v <= st.budget), d => -stats.get(d.id).nMatch);
+  const labelled = new Set(), names = new Set(), addLabel = d => { if (d && !names.has(short(d.c))) { names.add(short(d.c)); labelled.add(d.id); } };   // never the same name twice
+  addLabel(data.find(d => d.id === st.sel)); if (inv) st.compare.forEach(id => addLabel(data.find(d => d.id === id)));
+  pick.slice(0, CITY.W < 520 ? 2 : 3).forEach(addLabel);
+  /* a reference tower in the corner gives the heights a scale (hidden while zoomed, because the towers then change size) */
+  CITY.gTop.selectAll("*").remove();
+  if (on && data.length) { const top = d3.ticks(0, vmax, 3).filter(v => v > 0), sx = CITY.W < 520 ? 22 : 30, sy = hOf(top[top.length - 1]) + 34, sc = CITY.gTop.append("g").attr("transform", `translate(${sx},${sy})`);
+    sc.append("g").html(prism(0, hOf(top[top.length - 1]), "#c9c8c2"));
+    top.forEach(v => { sc.append("line").attr("x1", w / 2 + dx).attr("x2", w / 2 + dx + 6).attr("y1", -hOf(v) - dy).attr("y2", -hOf(v) - dy).attr("stroke", COL.ink2);
+      sc.append("text").attr("class", "note").attr("x", w / 2 + dx + 9).attr("y", -hOf(v) - dy).attr("dy", ".35em").text((inv ? fPm(v) : fAED(v))); });
+    sc.append("text").attr("class", "note").attr("x", -w / 2).attr("y", 14).text(inv ? "AED per m²" : "AED, " + st.rooms);
+    if (!inv && st.budget < top[top.length - 1] * 1.3) { sc.append("line").attr("x1", -w / 2 - 4).attr("x2", w / 2 + dx + 4).attr("y1", -hb).attr("y2", -hb).attr("stroke", "#0b0b0b").attr("stroke-width", 1.5).attr("stroke-dasharray", "4 2"); } }
+  const byPrice = st.metric === "price";                               // the Colour menu: lens colouring (budget / growth) or the price-per-m2 ramp
+  const mark = hh => `<path d="M${-w / 2 - 2},${-hh}h${w + 4}l${dx},${-dy}" fill="none" stroke="#0b0b0b" stroke-width="2"/>`;   // a black band around the tower
+  const body = d => { const h = hOf(d.v);
+    if (byPrice) { const sd = stats.get(d.id), col = sd.ok ? VIEW.metric.color(sd.med) : "#c9c8c2";
+      return prism(0, h, col) + (inv ? mark(hOf(d.v0)) : d.v > st.budget ? mark(hb) : ""); }       // the band = start-of-period price (investor) or the budget (buyer)
+    if (!inv) return d.v <= st.budget ? prism(0, h, GREEN) : prism(0, Math.min(hb, h), PALE) + prism(Math.min(hb, h), h, OVER);
+    const h0 = hOf(d.v0);                                              // the start-of-period level, drawn as a black band around the tower
+    return prism(0, h, d.g != null ? gcol(d.g - g0) : "#c9c8c2") + `<path d="M${-w / 2 - 2},${-h0}h${w + 4}l${dx},${-dy}" fill="none" stroke="#0b0b0b" stroke-width="2"/>`; };
+  const ring = d => { const k = inv ? st.compare.indexOf(d.id) : -1; return k >= 0 ? CMP_COL[k] : d.id === st.sel ? "#0b0b0b" : "none"; };
+  const hide = d => `translate(${d.x},${d.y}) scale(1,0)`;
+  const g = CITY.gTow.selectAll("g.tw").data(data, d => d.id).join(en => en.append("g").attr("class", "tw").attr("transform", hide), up => up,
+      ex => ex.transition().duration(DUR() ? 350 : 0).attr("transform", hide).remove()).order();          // .order(): back rows are drawn first (painter's algorithm)
+  if (dur > 300) g.attr("transform", hide);                                                    // a lens or layout change: sink, then re-grow with the new meaning
+  g.html(d => body(d) + (labelled.has(d.id) ? `<text class="lbl" text-anchor="middle" x="${dx / 2}" y="${-Math.max(hOf(d.v), inv ? hOf(d.v0) : 0) - dy - 5}" stroke="none">${short(d.c)}</text>` : ""))
+    .attr("stroke", ring).attr("stroke-width", d => ring(d) === "#0b0b0b" ? 1.4 : 2.6).style("cursor", "pointer")
+    .classed("dim", d => st.hi && !st.hi.has(d.id))
+    .on("pointermove", (ev, d) => { const s = stats.get(d.id), diff = d.v / st.budget - 1;
+      showTip(ev, inv ? `<b>${d.c.name}</b><br><span class="muted">${fInt(s.n)} sales in the period</span><table><tr><td>Price per m² then</td><td>AED ${fPm(d.v0)}</td></tr><tr><td>Price per m² now</td><td>AED ${fPm(d.v)}</td></tr><tr><td>Growth a year</td><td>${d.g != null ? d3.format("+.1%")(d.g) : "n/a"}</td></tr><tr><td>City</td><td>${d3.format("+.1%")(g0)}</td></tr></table>`
+        : `<b>${d.c.name}</b><br><span class="muted">${st.rooms} · ${s.nMatch} sales in the period</span><table><tr><td>Median price</td><td>AED ${fAED(d.v)}</td></tr><tr><td>Against my budget</td><td>${diff > 0 ? d3.format("+.0%")(diff) + " over" : d3.format(".0%")(-diff) + " under"}</td></tr><tr><td>Sales within budget</td><td>${s.afford != null ? fPct(s.afford) : "n/a"}</td></tr><tr><td>Nearest metro</td><td>${d.c.km.toFixed(1)} km</td></tr></table>`); })
+    .on("pointerleave", hideTip).on("click", (ev, d) => select(d.id));
+  g.transition().duration(dur || 250).delay((d, i) => dur > 300 ? 250 + i * 7 : 0).ease(d3.easeBackOut.overshoot(1.2)).attr("transform", d => `translate(${d.x},${d.y}) scale(1,1)`);
+}
+
+/* INVESTOR · comets: where each community came from. Tail = first months of the period, head = last months.
+   A comet pointing right got pricier; one pointing up got more liquid. */
+function renderComets() {
+  const st = STATE, stats = VIEW.stats, pts = DATA.comms.map(c => ({ c, s: stats.get(c.id) })).filter(d => d.s.ok && d.s.early && d.s.late);
+  const W = $("#cometSvg").parentNode.clientWidth - 24, H = W < 560 ? 380 : 440, m = { l: 48, r: 20, t: 22, b: 42 }, svg = d3.select("#cometSvg").attr("viewBox", `0 0 ${W} ${H}`);
+  svg.selectAll("*").remove();
+  $("#cometTitle").innerHTML = `Comets: from the first ${VIEW.win} months of the period to the last ${VIEW.win} <span class="muted" style="font-weight:400">· one comet per community</span>`;
+  if (!pts.length) { svg.append("text").attr("x", W / 2).attr("y", H / 2).attr("text-anchor", "middle").attr("font-size", 13).attr("fill", COL.ink2).text("No community has enough sales at both ends of this period. Widen it."); return; }
+  const xs = pts.flatMap(d => [d.s.early.med, d.s.late.med]), ys = pts.flatMap(d => [d.s.early.rate, d.s.late.rate]);
+  const x = d3.scaleLog([d3.min(xs) * .85, d3.max(xs) * 1.15], [m.l, W - m.r]), y = d3.scaleLog([d3.min(ys) * .8, d3.max(ys) * 1.3], [H - m.b, m.t]);
+  svg.append("g").attr("class", "grid").attr("transform", `translate(${m.l},0)`).call(d3.axisLeft(y).tickValues([10, 100, 1000].filter(v => v >= y.domain()[0] && v <= y.domain()[1])).tickSize(-(W - m.l - m.r)).tickFormat(""));
+  svg.append("g").attr("class", "axis").attr("transform", `translate(${m.l},0)`).call(d3.axisLeft(y).tickValues([10, 20, 50, 100, 200, 500, 1000].filter(v => v >= y.domain()[0] && v <= y.domain()[1])).tickFormat(d3.format("~s"))).call(g => g.select(".domain").remove());
+  svg.append("g").attr("class", "axis").attr("transform", `translate(0,${H - m.b})`).call(d3.axisBottom(x).ticks(W < 520 ? 4 : 7, "~s").tickSizeOuter(0));
+  svg.append("text").attr("class", "note").attr("x", W - m.r).attr("y", H - 8).attr("text-anchor", "end").text("median price per m² (AED, log scale) →  pricier");
+  svg.append("text").attr("class", "note").attr("x", 4).attr("y", 12).text("↑ sales per year (log scale): more liquid");
+  const g0 = VIEW.city.growth || 0, colr = d3.scaleThreshold([-.06, -.03, -.01, .01, .03, .06], COL.diverging), col = d => d.s.growth != null ? colr(d.s.growth - g0) : "#a3a29b";
+  const P = d => ({ tx: x(d.s.early.med), ty: y(d.s.early.rate), hx: x(d.s.late.med), hy: y(d.s.late.rate) });
+  const tail = (p, k) => { const hx = p.tx + (p.hx - p.tx) * k, hy = p.ty + (p.hy - p.ty) * k, L = Math.hypot(hx - p.tx, hy - p.ty) || 1, nx = -(hy - p.ty) / L * 4.2, ny = (hx - p.tx) / L * 4.2;
+    return `M${p.tx},${p.ty}L${hx + nx},${hy + ny}L${hx - nx},${hy - ny}Z`; };                       // a tapered triangle: point at the past, wide at the present
+  const slot = d => st.compare.indexOf(d.c.id);
+  const g = svg.append("g").selectAll("g").data(d3.sort(pts, d => slot(d) >= 0 ? 1 : 0), d => d.c.id).join("g").style("cursor", "pointer")
+    .on("pointermove", (ev, d) => showTip(ev, `<b>${short(d.c)}</b><table><tr><td></td><td>then</td><td>now</td></tr><tr><td>Median / m²</td><td>${fPm(d.s.early.med)}</td><td>${fPm(d.s.late.med)}</td></tr><tr><td>Sales a year</td><td>${Math.round(d.s.early.rate)}</td><td>${Math.round(d.s.late.rate)}</td></tr><tr><td>Price a year</td><td></td><td>${d.s.growth != null ? d3.format("+.1%")(d.s.growth) : "n/a"}</td></tr></table>`))
+    .on("pointerleave", hideTip).on("click", (ev, d) => select(d.c.id));
+  g.on("pointerenter.focus", function () { g.style("opacity", .12); d3.select(this).style("opacity", 1).raise(); }).on("pointerleave.focus", () => g.style("opacity", 1));   // focus one comet
+  g.append("path").attr("fill", col).attr("opacity", d => slot(d) >= 0 ? .85 : .38).attr("d", d => tail(P(d), 0)).transition().duration(DUR() * 1.3).ease(d3.easeCubicOut).attrTween("d", d => { const p = P(d); return k => tail(p, k); });
+  g.append("circle").attr("r", d => slot(d) >= 0 ? 6.5 : 4.5).attr("fill", col).attr("stroke", d => slot(d) >= 0 ? CMP_COL[slot(d)] : "#fcfcfb").attr("stroke-width", d => slot(d) >= 0 ? 3 : 1.2)
+    .attr("cx", d => P(d).tx).attr("cy", d => P(d).ty).transition().duration(DUR() * 1.3).ease(d3.easeCubicOut).attr("cx", d => P(d).hx).attr("cy", d => P(d).hy);
+  const lab = new Set(d3.sort(pts, d => -d.s.late.rate).slice(0, W < 520 ? 3 : 5).map(d => d.c.id)); st.compare.forEach(id => id != null && lab.add(id));
+  svg.append("g").selectAll("text").data(pts.filter(d => lab.has(d.c.id))).join("text").attr("class", "lbl").attr("x", d => P(d).hx + 9).attr("y", d => P(d).hy).attr("dy", ".35em").text(d => short(d.c))
+    .style("opacity", 0).transition().delay(DUR() * 1.3).duration(300).style("opacity", 1);
+}
+
+
+/* 5h. Data-quality text: cleaning steps and the table of problems, counted live */
+function renderLedger() {
+  const L = DATA.L, st = STATE;
+  const steps = [
+    { k: "1. All rows in the file", n: L.all, rm: 0 },
+    { k: "2. Remove sales before 2015 (too few to trust; the first is from " + L.minDate.slice(0, 4) + ")", n: L.all - L.old - L.baddate, rm: L.old + L.baddate },
+    { k: "3. Remove September 2026 (the month is not complete)", n: L.window, rm: L.future },
+    { k: "4. Remove mortgages and gifts (they have no market price)", n: L.window - L.notSale, rm: L.notSale },
+    { k: "5. Remove land and whole buildings (not comparable per m²)", n: L.base, rm: L.notHome },
+    { k: "6. Remove errors: under AED 1,000 per m² or under 10 m²" + (st.clean ? "" : " (switched off)"), n: L.base - (st.clean ? L.bad : 0), rm: st.clean ? L.bad : 0 }
+  ];
+  $("#dqSteps").innerHTML = steps.map(d => `<li><b>${d.k}</b>: ${fInt(d.n)} rows left${d.rm ? " (" + fInt(d.rm) + " removed)" : ""}</li>`).join("");
+  const pct = v => (v / L.base * 100).toFixed(1) + "%";
+  $("#dqTable").innerHTML = `<tr><th style="width:22%">Problem</th><th style="width:28%">How big</th><th>What we did</th></tr>
+  <tr><td><b>Dates</b> that are too old or not complete</td><td>${fInt(L.old)} rows before 2015 (the first is ${L.minDate}). ${fInt(L.future)} rows in September 2026.</td><td>We use January 2015 to August 2026 only. We read dates as text, so a time zone cannot move a sale to another month.</td></tr>
+  <tr><td><b>Days with no records</b></td><td>No Saturdays or Sundays. Almost no Fridays before 2022. 327 other weekdays are empty, mostly 2015–2019.</td><td>We never show single days. We group by month, quarter or year. The last quarter and year are not complete; we label them and do not estimate the rest.</td></tr>
+  <tr><td><b>Prices</b> that are far too low</td><td>${fInt(L.cheap)} sales under AED 1,000 per m² (lowest: AED 7.53). ${fInt(L.tiny)} sales under 10 m².</td><td>These are errors or not homes. We remove them (${fInt(L.bad)} rows, ${pct(L.bad)}). A switch puts them back, so you can see the effect.</td></tr>
+  <tr><td><b>Prices</b> that are very high</td><td>17 sales above AED 100,000 per m².</td><td>These are real (Palm Jumeirah, Jumeirah). We keep them. We use medians and quartiles, not averages, and log price axes.</td></tr>
+  <tr><td><b>Rows that are not home sales</b></td><td>${fInt(L.notSale)} mortgages and gifts. ${fInt(L.notHome)} land and whole-building sales.</td><td>Left out of every chart. A mortgage or gift is not a market price. Land and buildings cannot be compared per m² with flats and villas.</td></tr>
+  <tr><td><b>Few sales</b> in some communities (the file is a 10% sample)</td><td>112 communities have sales. Only about 76 have 10 or more.</td><td>We rate a community only if it has enough sales (slider, default 10). Others are hatched or hollow, not coloured. We never multiply counts by 10.</td></tr>
+  <tr><td><b>Empty cells</b></td><td>Nearest metro: empty in ${pct(L.noMetro)} of sales. Rooms: ${pct(L.noRooms)}. Master project: ${pct(L.noMaster)}. No coordinates: ${L.noCoord}.</td><td>Metro: we measure the distance ourselves from the 56 station coordinates. Rooms: the sale still counts for its community, but not in bedroom figures. Master project: left out of Launch waves only. We never invent a value.</td></tr>
+  <tr><td><b>Extra data from other years</b></td><td>Population is from 2018/2019. Metro stations are from about 2020. 3 communities have zero population.</td><td>We label it “2019 population”. We do not compute sales per 1,000 residents under 500 residents.</td></tr>`;
+}
+
+/* ---------- 6. WIRING ---------- */
+function setHi(set) {
+  STATE.hi = set; d3.selectAll("#citySvg .poly, #citySvg .bubble").classed("dim", d => set && !set.has(d.id)); }
+function select(id) {                             // one selection for every sub-view
+  STATE.sel = id; const c = DATA.commById.get(id);
+  if (STATE.persona === "investor") addCompare(id);          // in the investor lens a click also shortlists
+  if (c.project) STATE.dev = c.project;
+  update(false);
+}
+function update(animate) {                       // the one path every interaction goes through
+  compute();
+  const L = STATE.persona;                       // only the active lens's sub-views are drawn (the others are hidden and have no width)
+  if (L === "investor") seedCompare();
+  renderCity(animate); renderRank(); renderProfile();
+  if (L === "investor") { renderComets(); renderCompare(); }
+  renderLedger(); syncControls();
+}
+function seg(id, opts, get, set) {               // segmented control helper
+  const root = d3.select(id); root.selectAll("button").data(opts).join("button").attr("type", "button").text(d => d[1]).on("click", (ev, d) => set(d[0]));
+  return () => root.selectAll("button").attr("aria-pressed", d => String(get() === d[0]));
+}
+const SYNC = [];
+const budgetScale = d3.scaleLog([300000, 20000000], [0, 100]);
+function syncControls() {
+  SYNC.forEach(f => f());
+  $("#selMetric").value = STATE.metric;
+  $("#minN").value = STATE.minN; $("#minNLabel").textContent = STATE.minN; $("#clean").checked = STATE.clean; $("#metro").checked = STATE.metro;
+  $("#selRooms").value = STATE.rooms; $("#budget").value = budgetScale(STATE.budget); $("#budgetLabel").textContent = "AED " + fAED(STATE.budget);
+  const P = PERSONAS[STATE.persona];
+  d3.selectAll("#dockBtns button").attr("aria-pressed", d => String(d === STATE.persona));
+  const act = $('#dockBtns button[aria-pressed="true"]'); if (act) { $("#dockInd").style.left = act.offsetLeft + "px"; $("#dockInd").style.width = act.offsetWidth + "px"; }
+  $("#stageTag").textContent = "Visualization " + PAGE_INFO.n + " · " + P.name + " lens"; $("#stageTitle").textContent = P.title;
+  $("#minNName").textContent = STATE.persona === "investor" ? "Liquidity floor" : "Reliability";
+  $("#brief").innerHTML = `<b>${P.name} lens.</b><ol>${P.brief.map(b => `<li>${b}</li>`).join("")}</ol>`;
+}
+const METRIC_NAMES = { afford: "Colour: within my budget", price: "Colour: median price per m²", growth: "Colour: price growth per year", offshare: "Colour: off-plan share", per1000: "Colour: sales per 1,000 residents", dist: "Colour: distance to metro" };
+function applyLens(key, first) {                 // switch persona: same hero view, new meaning, new sub-views
+  const run = () => {
+    const P = PERSONAS[key]; STATE.persona = key;
+    Object.assign(STATE, P.preset, { range: P.preset.range.slice(), pinStation: null, hi: null });
+    document.body.dataset.persona = key;                                  // CSS shows this lens's controls and sections
+    d3.select("#selMetric").selectAll("option").data(P.metrics, d => d).join("option").attr("value", d => d).text(d => METRIC_NAMES[d]);
+    const mn = $("#minN"), inv = key === "investor"; mn.min = inv ? 10 : 3; mn.max = inv ? 300 : 60; mn.step = inv ? 5 : 1;   // the investor's floor is about liquidity, so it reaches higher
+    if (STATE.minN > 60 && !inv) STATE.minN = 10;
+    d3.selectAll(".pv").style("animation", "none"); void document.body.offsetWidth; d3.selectAll(".pv").style("animation", null);   // replay the entrance of the sub-views
+    d3.select("#citySvg").call(CITY.zoom.transform, d3.zoomIdentity);
+    compute(); renderBrush(); update(true);
+  };
+  /* bring the hero into view first, so the transition is actually seen */
+  const r = $("#stage").getBoundingClientRect();
+  if (!first && (r.top < -60 || r.top > innerHeight * .45)) { $("#stage").scrollIntoView({ behavior: "smooth", block: "start" }); setTimeout(run, 520); } else run();
+}
+function setLayout(l) {
+  /* reset pan/zoom at once (not as a transition): a running zoom transition re-places the circles on every frame and would cancel the layout animation */
+  if (l === "scatter" || l === "rings") d3.select("#citySvg").call(CITY.zoom.transform, d3.zoomIdentity);
+  STATE.layout = l; update(true);
+}
+function init() {
+  $("#pageH1").textContent = PAGE_INFO.h1; $("#pageLede").textContent = PAGE_INFO.lede;
+  d3.select("#dockBtns").selectAll("button").data(PAGE_INFO.lenses).join("button").attr("type", "button").text(d => PERSONAS[d].dock).on("click", (ev, d) => { if (d !== STATE.persona) applyLens(d); });
+  SYNC.push(seg("#segLayout", PAGE_INFO.layouts, () => STATE.layout, setLayout));
+  SYNC.push(seg("#segType", [["all", "Units + villas"], ["unit", "Units"], ["villa", "Villas"]], () => STATE.type, v => { STATE.type = v; compute(); renderBrush(); update(true); }));
+  SYNC.push(seg("#segReg", [["all", "All"], ["off", "Off-plan"], ["ready", "Existing"]], () => STATE.reg, v => { STATE.reg = v; compute(); renderBrush(); update(true); }));
+  $("#selMetric").onchange = e => { STATE.metric = e.target.value; update(true); };
+  $("#minN").oninput = e => { $("#minNLabel").textContent = e.target.value; }; $("#minN").onchange = e => { STATE.minN = +e.target.value; update(false); };
+  $("#clean").onchange = e => { STATE.clean = e.target.checked; compute(); renderBrush(); update(false); };
+  $("#metro").onchange = e => { STATE.metro = e.target.checked; renderCity(false); };
+  d3.selectAll("[data-range]").on("click", ev => { const k = ev.currentTarget.dataset.range, N = CFG.nMonths - 1;
+    STATE.range = k === "all" ? [0, N] : k === "24" ? [N - 23, N] : k === "2021" ? [72, N] : [0, 71]; renderBrush(); update(true); });
+  d3.select("#selRooms").selectAll("option").data(CFG.rooms).join("option").attr("value", d => d).text(d => d.replace("B/R", "bedroom"));
+  $("#selRooms").onchange = e => { STATE.rooms = e.target.value; update(true); };
+  $("#budget").oninput = e => { STATE.budget = Math.round(budgetScale.invert(+e.target.value) / 25000) * 25000; $("#budgetLabel").textContent = "AED " + fAED(STATE.budget);
+    compute(); renderCity(false); };                                        // towers follow the slider live
+  $("#budget").onchange = () => update(false);
+  setupCity(); sizeCity(); applyLens(PAGE_INFO.lenses[0], true);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(syncControls);
+  /* responsive: re-measure and redraw when the container width changes (rotation, window resize) */
+  let lastW = innerWidth, timer;
+  addEventListener("resize", () => { if (innerWidth === lastW) return; lastW = innerWidth; clearTimeout(timer);
+    timer = setTimeout(() => { d3.select("#citySvg").call(CITY.zoom.transform, d3.zoomIdentity); sizeCity(); renderBrush(); update(false); }, 150); });
+  document.addEventListener("pointerdown", ev => { if (ev.pointerType !== "mouse" && !ev.target.closest("svg")) hideTip(); });
+}
+load().then(() => { init(); $("#loader").remove(); })
+  .catch(err => { console.error(err); $("#loader").innerHTML = "<b>The data could not be loaded.</b><span class='muted small'>" + err.message + "<br>Check the internet connection and reload: the page reads its data live from raw.githubusercontent.com.</span>"; });
+</script>
+</body>
+</html>
